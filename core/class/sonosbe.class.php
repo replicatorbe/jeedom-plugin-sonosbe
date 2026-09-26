@@ -78,6 +78,9 @@ class sonosbe extends eqLogic {
         } catch (Throwable $e) {
             log::add(__CLASS__, 'debug', __('Topologie :', __FILE__) . ' ' . $e->getMessage());
         }
+        /* Relus : la topologie vient peut-être de corriger une adresse, sur
+         * d'autres instances que celles-ci. */
+        $eqLogics = self::configured();
         $slowTurn = ((int) date('i')) % 5 === 0;
         foreach ($eqLogics as $eqLogic) {
             if (!$slowTurn && (int) $eqLogic->getCache('failures', 0) >= self::OFFLINE_AFTER) {
@@ -106,6 +109,11 @@ class sonosbe extends eqLogic {
         } catch (Throwable $e) {
             log::add(__CLASS__, 'debug', __('Favoris :', __FILE__) . ' ' . $e->getMessage());
         }
+        try {
+            self::recoverLost($eqLogics);
+        } catch (Throwable $e) {
+            log::add(__CLASS__, 'debug', __('Recherche des enceintes perdues :', __FILE__) . ' ' . $e->getMessage());
+        }
         foreach ($eqLogics as $eqLogic) {
             if ($eqLogic->getConfiguration('capabilities_at', '') === '' && (int) $eqLogic->getCache('failures', 0) === 0) {
                 try {
@@ -113,6 +121,39 @@ class sonosbe extends eqLogic {
                 } catch (Throwable $e) {
                     log::add(__CLASS__, 'debug', $eqLogic->getHumanName() . ' : ' . $e->getMessage());
                 }
+            }
+        }
+    }
+
+    /*
+     * Une enceinte injoignable a peut-être changé d'adresse. La topologie la
+     * retrouve dès qu'une autre enceinte répond ; mais si toutes sont
+     * perdues, ou s'il n'y en a qu'une, il faut chercher sur le réseau. Une
+     * fois par heure, et seulement dans ce cas.
+     */
+    public static function recoverLost($_eqLogics) {
+        $lost = array();
+        foreach ($_eqLogics as $eqLogic) {
+            if ((int) $eqLogic->getCache('failures', 0) >= self::OFFLINE_AFTER) {
+                $lost[$eqLogic->uid()] = $eqLogic;
+            }
+        }
+        if (empty($lost)) {
+            return;
+        }
+        foreach (self::discover()['devices'] as $device) {
+            if (!isset($lost[$device['uid']]) || $device['ip'] === $lost[$device['uid']]->ip()) {
+                continue;
+            }
+            $eqLogic = $lost[$device['uid']];
+            log::add(__CLASS__, 'info', sprintf(__('%s : retrouvée à l\'adresse %s (était %s)', __FILE__),
+                $eqLogic->getHumanName(), $device['ip'], $eqLogic->ip()));
+            $eqLogic->applyDescription($device);
+            $eqLogic->save();
+            try {
+                $eqLogic->poll();
+            } catch (Throwable $e) {
+                log::add(__CLASS__, 'debug', $eqLogic->getHumanName() . ' : ' . $e->getMessage());
             }
         }
     }
@@ -130,7 +171,7 @@ class sonosbe extends eqLogic {
             array(
                 'test'   => __('Enceintes joignables', __FILE__),
                 'result' => (count($eqLogics) - count($offline)) . '/' . count($eqLogics) . (empty($offline) ? '' : ' — ' . $names($offline)),
-                'advice' => empty($offline) ? '' : __('Vérifiez que ces enceintes sont alimentées et sur le réseau. Une adresse IP changée est corrigée seule dès qu\'une autre enceinte répond.', __FILE__),
+                'advice' => empty($offline) ? '' : __('Vérifiez que ces enceintes sont alimentées et sur le réseau. Une adresse IP changée est corrigée seule : aussitôt si une autre enceinte répond, sinon par une recherche sur le réseau, une fois par heure.', __FILE__),
                 'state'  => empty($offline),
             ),
             array(
@@ -311,16 +352,22 @@ class sonosbe extends eqLogic {
         return array('devices' => $found);
     }
 
-    /* M-SEARCH SSDP : les adresses qui répondent en ZonePlayer. */
+    /*
+     * M-SEARCH SSDP : les adresses qui répondent en ZonePlayer. La socket
+     * n'est pas « connectée » à l'adresse multicast : les réponses arrivent
+     * de l'adresse de chaque enceinte, qu'une socket connectée à
+     * 239.255.255.250 rejetterait toutes.
+     */
     public static function ssdpSearch($_seconds = 2) {
-        $socket = @stream_socket_client('udp://239.255.255.250:1900', $errno, $errstr, 1);
+        $socket = @stream_socket_server('udp://0.0.0.0:0', $errno, $errstr, STREAM_SERVER_BIND);
         if ($socket === false) {
             return array();
         }
         $request = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\n"
                  . "ST: urn:schemas-upnp-org:device:ZonePlayer:1\r\n\r\n";
-        @fwrite($socket, $request);
-        @fwrite($socket, $request);
+        /* Deux envois : l'UDP ne garantit rien. */
+        @stream_socket_sendto($socket, $request, 0, '239.255.255.250:1900');
+        @stream_socket_sendto($socket, $request, 0, '239.255.255.250:1900');
         stream_set_blocking($socket, false);
         $ips = array();
         $deadline = microtime(true) + $_seconds;
@@ -329,7 +376,7 @@ class sonosbe extends eqLogic {
             $write = null;
             $except = null;
             if (@stream_select($read, $write, $except, 0, 200000) > 0) {
-                $answer = (string) @fread($socket, 4096);
+                $answer = (string) @stream_socket_recvfrom($socket, 4096);
                 if (preg_match('#LOCATION:\s*http://([\d.]+):1400/#i', $answer, $m)) {
                     $ips[$m[1]] = true;
                 }
@@ -579,13 +626,18 @@ class sonosbe extends eqLogic {
         if (!is_object($cmd)) {
             return;
         }
-        $choices = array();
+        $names = array();
         foreach ($_players as $uid => $player) {
             if ($uid !== $this->uid()) {
-                $choices[] = $uid . '|' . self::listText($player['name']);
+                $names[$uid] = self::listText($player['name']);
             }
         }
-        natcasesort($choices);
+        /* Triée par pièce, pas par identifiant. */
+        natcasesort($names);
+        $choices = array();
+        foreach ($names as $uid => $name) {
+            $choices[] = $uid . '|' . $name;
+        }
         $list = implode(';', $choices);
         if ($cmd->getConfiguration('listValue', '') !== $list) {
             $cmd->setConfiguration('listValue', $list);
@@ -668,28 +720,36 @@ class sonosbe extends eqLogic {
     public function poll() {
         $ip = $this->ip();
         $coordinatorIp = $this->coordinatorIp();
+        /* Joignable ou non, c'est l'enceinte elle-même qui le dit : dans un
+         * groupe, le coordinateur peut répondre pour une enceinte éteinte. */
         try {
-            $transport = sonosbeUpnp::call($coordinatorIp, 'AVTransport', 'GetTransportInfo', array('InstanceID' => 0), self::POLL_TIMEOUT);
+            $volume = sonosbeUpnp::call($ip, 'RenderingControl', 'GetVolume', array('InstanceID' => 0, 'Channel' => 'Master'), self::POLL_TIMEOUT);
         } catch (sonosbeUnreachable $e) {
             $this->noteFailure($e->getMessage());
             return false;
         }
         $values = array();
-        $state = isset($transport['CurrentTransportState']) ? $transport['CurrentTransportState'] : '';
-        $values['state'] = isset(sonosbeUpnp::STATE_NAMES[$state]) ? sonosbeUpnp::STATE_NAMES[$state] : $state;
-        $values['playing'] = $state === 'PLAYING' ? 1 : 0;
+        /* Ce qui joue vient du coordinateur. S'il ne répond pas (enceinte
+         * d'un autre étage éteinte), on garde les dernières valeurs plutôt
+         * que de tout effacer. */
+        $now = null;
+        $transport = $this->quietCall($coordinatorIp, 'AVTransport', 'GetTransportInfo', array('InstanceID' => 0));
+        if (isset($transport['CurrentTransportState'])) {
+            $state = $transport['CurrentTransportState'];
+            $values['state'] = isset(sonosbeUpnp::STATE_NAMES[$state]) ? sonosbeUpnp::STATE_NAMES[$state] : $state;
+            $values['playing'] = $state === 'PLAYING' ? 1 : 0;
+            $media = $this->quietCall($coordinatorIp, 'AVTransport', 'GetMediaInfo', array('InstanceID' => 0));
+            $position = $this->quietCall($coordinatorIp, 'AVTransport', 'GetPositionInfo', array('InstanceID' => 0));
+            $now = sonosbeUpnp::nowPlaying((array) $media, (array) $position, $coordinatorIp);
+            $values['source'] = __(sonosbeUpnp::SOURCE_NAMES[$now['source']], __FILE__);
+            $values['title'] = $now['title'];
+            $values['artist'] = $now['artist'];
+            $values['album'] = $now['album'];
+            $values['station'] = $now['station'];
+            $values['cover'] = $now['art'];
+            $now['state'] = $state;
+        }
 
-        $media = $this->quietCall($coordinatorIp, 'AVTransport', 'GetMediaInfo', array('InstanceID' => 0));
-        $position = $this->quietCall($coordinatorIp, 'AVTransport', 'GetPositionInfo', array('InstanceID' => 0));
-        $now = sonosbeUpnp::nowPlaying((array) $media, (array) $position, $coordinatorIp);
-        $values['source'] = __(sonosbeUpnp::SOURCE_NAMES[$now['source']], __FILE__);
-        $values['title'] = $now['title'];
-        $values['artist'] = $now['artist'];
-        $values['album'] = $now['album'];
-        $values['station'] = $now['station'];
-        $values['cover'] = $now['art'];
-
-        $volume = $this->quietCall($ip, 'RenderingControl', 'GetVolume', array('InstanceID' => 0, 'Channel' => 'Master'));
         if (isset($volume['CurrentVolume'])) {
             $values['volume'] = (int) $volume['CurrentVolume'];
         }
@@ -729,7 +789,9 @@ class sonosbe extends eqLogic {
         foreach ($values as $logicalId => $value) {
             $this->publishCmd($logicalId, $value);
         }
-        $this->setCache('now', $now + array('state' => $state, 'at' => date('Y-m-d H:i:s')));
+        if ($now !== null) {
+            $this->setCache('now', $now + array('at' => date('Y-m-d H:i:s')));
+        }
         return true;
     }
 
@@ -876,17 +938,21 @@ class sonosbe extends eqLogic {
             default:
                 throw new Exception(__('Commande inconnue :', __FILE__) . ' ' . $_logicalId);
         }
-        if ($refreshTopology) {
-            self::refreshTopology(self::configured());
-            foreach (self::configured() as $eqLogic) {
+        /* L'ordre est passé : un relevé qui échoue ensuite ne doit pas le
+         * faire paraître en échec au scénario. L'enceinte applique l'ordre de
+         * façon asynchrone : un instant avant de relire, sans quoi on relève
+         * encore l'ancien état. */
+        usleep(300000);
+        try {
+            if ($refreshTopology) {
+                self::refreshTopology(self::configured());
+            }
+            foreach ($refreshTopology ? self::configured() : array($this) as $eqLogic) {
                 $eqLogic->poll();
             }
-            return;
+        } catch (Throwable $e) {
+            log::add(__CLASS__, 'debug', $this->getHumanName() . ' : ' . __('relevé après l\'ordre :', __FILE__) . ' ' . $e->getMessage());
         }
-        /* L'enceinte applique l'ordre de façon asynchrone : un instant avant
-         * de relire, sans quoi on relève encore l'ancien état. */
-        usleep(300000);
-        $this->poll();
     }
 
     /* Une radio ou la TV ne se mettent pas en pause : Sonos répond 701. */
@@ -958,6 +1024,12 @@ class sonosbe extends eqLogic {
                     if ($member['uid'] === $this->uid()) {
                         throw new Exception(__('Une enceinte ne peut pas rejoindre son propre groupe.', __FILE__));
                     }
+                    /* Déjà dans ce groupe : rien à faire. Le demander quand
+                     * même, à son propre coordinateur, casserait le groupe. */
+                    if ($group['coordinator'] === $this->uid()
+                        || in_array($this->uid(), array_map(function ($m) { return $m['uid']; }, $group['members']), true)) {
+                        return;
+                    }
                     sonosbeUpnp::call($this->ip(), 'AVTransport', 'SetAVTransportURI', array('InstanceID' => 0,
                         'CurrentURI' => 'x-rincon:' . $group['coordinator'], 'CurrentURIMetaData' => ''), self::ACTION_TIMEOUT);
                     return;
@@ -972,7 +1044,8 @@ class sonosbe extends eqLogic {
     /* Volume d'une annonce : le titre de la commande s'il est renseigné,
      * sinon le réglage de l'équipement. */
     public function announceVolume($_title) {
-        $title = trim((string) $_title);
+        /* « 30 », « 30 % » ou « 30% ». */
+        $title = trim(str_replace('%', '', (string) $_title));
         if ($title !== '' && is_numeric($title)) {
             return max(0, min(100, (int) $title));
         }
@@ -1019,7 +1092,7 @@ class sonosbe extends eqLogic {
         $used = '';
         if ($method !== 'interrupt' && $this->hasAudioClip()) {
             try {
-                $this->audioClip($url, $_volume);
+                $this->queuedAudioClip($url, $_volume, isset($_clip['duration']) ? (float) $_clip['duration'] : 0.0);
                 $used = 'clip';
             } catch (Throwable $e) {
                 if ($method === 'clip') {
@@ -1039,6 +1112,31 @@ class sonosbe extends eqLogic {
         log::add(__CLASS__, 'info', sprintf('%s : %s « %s » (volume %d)', $this->getHumanName(),
             $used === 'clip' ? __('annonce', __FILE__) : __('annonce avec interruption', __FILE__), $_label, $_volume));
         return array('method' => $used, 'url' => $url);
+    }
+
+    /*
+     * Deux annonces rapprochées (deux lignes d'un scénario, un scénario et le
+     * micro) se suivent au lieu de se couper : la seconde attend la fin de
+     * la première, dont la durée est connue. Une annonce jouée par URL, de
+     * durée inconnue, n'impose pas d'attente.
+     */
+    const CLIP_MAX_WAIT = 60;
+
+    private function queuedAudioClip($_url, $_volume, $_duration) {
+        $lock = self::lock('clip-' . $this->uid());
+        try {
+            $busyUntil = (float) $this->getCache('clip_busy_until', 0);
+            $wait = min(self::CLIP_MAX_WAIT, $busyUntil - microtime(true));
+            if ($wait > 0) {
+                usleep((int) ($wait * 1000000));
+            }
+            $this->audioClip($_url, $_volume);
+            /* Marge : l'enceinte met un instant à charger le fichier et à
+             * baisser le son. */
+            $this->setCache('clip_busy_until', $_duration > 0 ? microtime(true) + $_duration + 1.0 : 0);
+        } finally {
+            self::unlock($lock);
+        }
     }
 
     public function audioClip($_url, $_volume) {
@@ -1071,9 +1169,10 @@ class sonosbe extends eqLogic {
 
         /* Deux annonces sur le même groupe se suivent au lieu de se
          * mélanger : la seconde attend la fin de la première. */
-        $lock = fopen(jeedom::getTmpFolder(__CLASS__) . '/announce-' . preg_replace('/[^A-Za-z0-9_]/', '', $coordinatorUid) . '.lock', 'c');
-        flock($lock, LOCK_EX);
+        $lock = self::lock('announce-' . $coordinatorUid);
         try {
+            /* Ce qui joue, noté avant de toucher à quoi que ce soit : si la
+             * lecture de l'état échoue, on n'a encore rien changé. */
             $state = $av('GetTransportInfo')['CurrentTransportState'];
             $media = $av('GetMediaInfo');
             $position = $av('GetPositionInfo');
@@ -1081,67 +1180,104 @@ class sonosbe extends eqLogic {
             $mute = (int) $rc('GetMute')['CurrentMute'];
             $source = sonosbeUpnp::sourceOf($media['CurrentURI']);
 
-            if ($state === 'PLAYING' && $source === 'queue') {
-                $av('Pause');
-            }
-            $rc('SetVolume', array('DesiredVolume' => $_volume));
-            if ($mute) {
-                $rc('SetMute', array('DesiredMute' => 0));
-            }
-            $av('SetAVTransportURI', array('CurrentURI' => $_url, 'CurrentURIMetaData' => sonosbeUpnp::didlForUrl($_url, $_label)));
-            $av('Play', array('Speed' => 1));
-
-            /* Fin du message : l'enceinte repasse à l'arrêt. La durée connue
-             * sert de garde-fou, avec une marge pour le chargement. */
-            $started = microtime(true);
-            $limit = $_duration > 0 ? $_duration + 6 : self::INTERRUPT_MAX_SECONDS;
-            $limit = min($limit, self::INTERRUPT_MAX_SECONDS);
-            usleep(800000);
-            while (microtime(true) - $started < $limit) {
-                try {
-                    $now = $av('GetTransportInfo')['CurrentTransportState'];
-                    if ($now === 'STOPPED' || $now === 'NO_MEDIA_PRESENT') {
-                        break;
-                    }
-                } catch (Throwable $e) {
-                    /* Un relevé manqué n'arrête pas l'attente. */
+            /* À partir d'ici, quoi qu'il arrive au message (fichier illisible,
+             * enceinte qui refuse), ce qui jouait est rétabli. */
+            try {
+                if ($state === 'PLAYING' && $source === 'queue') {
+                    $av('Pause');
                 }
-                usleep(400000);
-            }
-
-            $rc('SetVolume', array('DesiredVolume' => $volume));
-            if ($mute) {
-                $rc('SetMute', array('DesiredMute' => 1));
-            }
-            if ($media['CurrentURI'] === '') {
-                return;
-            }
-            if ($source === 'queue') {
-                $av('SetAVTransportURI', array('CurrentURI' => 'x-rincon-queue:' . $coordinatorUid . '#0', 'CurrentURIMetaData' => ''));
-                if ((int) $position['Track'] > 0) {
-                    $av('Seek', array('Unit' => 'TRACK_NR', 'Target' => (int) $position['Track']));
-                    if (sonosbeUpnp::hmsToSeconds($position['RelTime']) > 0) {
-                        try {
-                            $av('Seek', array('Unit' => 'REL_TIME', 'Target' => $position['RelTime']));
-                        } catch (sonosbeUpnpError $e) {
-                            /* Morceau non positionnable (flux) : il reprend au début. */
-                        }
-                    }
+                $rc('SetVolume', array('DesiredVolume' => $_volume));
+                if ($mute) {
+                    $rc('SetMute', array('DesiredMute' => 0));
                 }
-            } else {
-                $av('SetAVTransportURI', array('CurrentURI' => $media['CurrentURI'], 'CurrentURIMetaData' => $media['CurrentURIMetaData']));
-            }
-            if ($state === 'PLAYING' || $state === 'TRANSITIONING') {
-                try {
-                    $av('Play', array('Speed' => 1));
-                } catch (sonosbeUpnpError $e) {
-                    /* La TV reprend seule quand elle émet. */
-                }
+                $av('SetAVTransportURI', array('CurrentURI' => $_url, 'CurrentURIMetaData' => sonosbeUpnp::didlForUrl($_url, $_label)));
+                $av('Play', array('Speed' => 1));
+                $this->waitEndOfClip($av, $_duration);
+            } finally {
+                $this->restoreAfterInterrupt($av, $rc, $coordinatorUid, $state, $media, $position, $source, $volume, $mute);
             }
         } finally {
-            flock($lock, LOCK_UN);
-            fclose($lock);
+            self::unlock($lock);
         }
+    }
+
+    /* Fin du message : l'enceinte repasse à l'arrêt (ou quelqu'un a mis en
+     * pause). La durée connue sert de garde-fou, avec une marge pour le
+     * chargement du fichier. */
+    private function waitEndOfClip($_av, $_duration) {
+        $started = microtime(true);
+        $limit = min($_duration > 0 ? $_duration + 6 : self::INTERRUPT_MAX_SECONDS, self::INTERRUPT_MAX_SECONDS);
+        usleep(800000);
+        while (microtime(true) - $started < $limit) {
+            try {
+                $now = $_av('GetTransportInfo')['CurrentTransportState'];
+                if (in_array($now, array('STOPPED', 'NO_MEDIA_PRESENT', 'PAUSED_PLAYBACK'), true)) {
+                    return;
+                }
+            } catch (Throwable $e) {
+                /* Un relevé manqué n'arrête pas l'attente. */
+            }
+            usleep(400000);
+        }
+    }
+
+    /*
+     * Rétablit ce qui jouait avant une annonce. Chaque étape est tentée même
+     * si la précédente échoue : un morceau impossible à repositionner ne doit
+     * pas empêcher de rendre le volume ni de relancer la lecture.
+     */
+    private function restoreAfterInterrupt($_av, $_rc, $_coordinatorUid, $_state, $_media, $_position, $_source, $_volume, $_mute) {
+        $steps = array();
+        $steps[] = function () use ($_rc, $_volume) { $_rc('SetVolume', array('DesiredVolume' => $_volume)); };
+        if ($_mute) {
+            $steps[] = function () use ($_rc) { $_rc('SetMute', array('DesiredMute' => 1)); };
+        }
+        $queue = 'x-rincon-queue:' . $_coordinatorUid . '#0';
+        if ($_media['CurrentURI'] === '') {
+            /* Rien ne jouait : on remet la file d'attente, sans quoi un
+             * « Lecture » plus tard rejouerait l'annonce. */
+            $steps[] = function () use ($_av, $queue) { $_av('SetAVTransportURI', array('CurrentURI' => $queue, 'CurrentURIMetaData' => '')); };
+        } elseif ($_source === 'queue') {
+            $steps[] = function () use ($_av, $queue) { $_av('SetAVTransportURI', array('CurrentURI' => $queue, 'CurrentURIMetaData' => '')); };
+            if ((int) $_position['Track'] > 0) {
+                $steps[] = function () use ($_av, $_position) { $_av('Seek', array('Unit' => 'TRACK_NR', 'Target' => (int) $_position['Track'])); };
+                if (sonosbeUpnp::hmsToSeconds($_position['RelTime']) > 0) {
+                    $steps[] = function () use ($_av, $_position) { $_av('Seek', array('Unit' => 'REL_TIME', 'Target' => $_position['RelTime'])); };
+                }
+            }
+        } else {
+            $steps[] = function () use ($_av, $_media) {
+                $_av('SetAVTransportURI', array('CurrentURI' => $_media['CurrentURI'], 'CurrentURIMetaData' => $_media['CurrentURIMetaData']));
+            };
+        }
+        if ($_media['CurrentURI'] !== '' && ($_state === 'PLAYING' || $_state === 'TRANSITIONING')) {
+            $steps[] = function () use ($_av) { $_av('Play', array('Speed' => 1)); };
+        }
+        foreach ($steps as $step) {
+            try {
+                $step();
+            } catch (Throwable $e) {
+                /* La TV reprend seule quand elle émet ; un flux n'est pas
+                 * toujours repositionnable. */
+                log::add(__CLASS__, 'debug', $this->getHumanName() . ' : ' . __('rétablissement après annonce :', __FILE__) . ' ' . $e->getMessage());
+            }
+        }
+    }
+
+    /* Verrou nommé, partagé entre processus (scénarios, cron, page). */
+    private static function lock($_name) {
+        $file = jeedom::getTmpFolder(__CLASS__) . '/' . preg_replace('/[^A-Za-z0-9_\-]/', '', $_name) . '.lock';
+        $lock = @fopen($file, 'c');
+        if ($lock === false) {
+            throw new Exception(__('Verrou impossible à créer :', __FILE__) . ' ' . $file);
+        }
+        flock($lock, LOCK_EX);
+        return $lock;
+    }
+
+    private static function unlock($_lock) {
+        flock($_lock, LOCK_UN);
+        fclose($_lock);
     }
 
     /* =========================================================== COMMANDES */

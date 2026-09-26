@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.1 — 26/09/2026
+
+- Recherche SSDP : les réponses des enceintes étaient toutes rejetées.
+- Une enceinte seule qui change d'adresse est retrouvée par une recherche
+  horaire sur le réseau.
+- Annonce avec interruption : la lecture et le volume sont rétablis même
+  si le message échoue en route ; rien ne rejoue l'annonce ensuite.
+- Deux annonces rapprochées se suivent au lieu de se couper.
+- Une enceinte éteinte n'est plus déclarée joignable parce que le
+  coordinateur de son groupe répond.
+- Un ordre réussi n'est plus signalé en échec quand le relevé qui suit
+  échoue.
+- Les Bridge et Boost ne sont plus proposés comme enceintes.
+- Rejoindre un groupe dont on fait déjà partie ne le casse plus.
+- Volume d'annonce accepté sous la forme « 30 % ».
+- Micro : un double clic n'ouvre plus deux enregistrements.
+
 ## 0.1.0 — 26/09/2026
 
 Première version.

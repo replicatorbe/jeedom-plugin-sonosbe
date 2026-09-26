@@ -99,9 +99,10 @@ $paired = '<ZoneGroupState><ZoneGroups>'
     . '</ZoneGroupMember>'
     . '<ZoneGroupMember UUID="RINCON_C01400" Location="http://10.0.0.4:1400/xml/device_description.xml" ZoneName="Cuisine"/>'
     . '<ZoneGroupMember UUID="RINCON_D01400" Location="http://10.0.0.5:1400/xml/device_description.xml" ZoneName="Cuisine" Invisible="1"/>'
+    . '<ZoneGroupMember UUID="RINCON_E01400" Location="http://10.0.0.6:1400/xml/device_description.xml" ZoneName="BOOST" IsZoneBridge="1"/>'
     . '</ZoneGroup></ZoneGroups></ZoneGroupState>';
 $groups = sonosbeUpnp::parseZoneGroupState($paired);
-check('groupe Salon + Cuisine : deux membres visibles', array_map(function ($m) { return $m['uid']; }, $groups[0]['members']), array('RINCON_A01400', 'RINCON_C01400'));
+check('groupe Salon + Cuisine : deux membres visibles, ni appairées ni Boost', array_map(function ($m) { return $m['uid']; }, $groups[0]['members']), array('RINCON_A01400', 'RINCON_C01400'));
 
 /* ---------------------------------------------------------------- FAVORIS */
 section('Favoris');

@@ -90,7 +90,11 @@ class sonosbeVoice {
     }
 
     public static function url($_file) {
-        $relative = substr(realpath($_file), strlen(realpath(self::dataDir() . '/..')));
+        $real = realpath($_file);
+        if ($real === false) {
+            throw new Exception(__('Fichier audio introuvable :', __FILE__) . ' ' . $_file);
+        }
+        $relative = substr($real, strlen(realpath(self::dataDir() . '/..')));
         return self::baseUrl() . '/plugins/sonosbe' . str_replace(DIRECTORY_SEPARATOR, '/', $relative);
     }
 
@@ -337,20 +341,27 @@ class sonosbeVoice {
         $wav = self::padWav($_wav, self::LEAD_MS, self::TAIL_MS);
         $duration = self::wavDuration($wav);
         $ffmpeg = self::ffmpeg();
+        /* Noms provisoires propres à ce processus : deux scénarios qui disent
+         * la même phrase au même moment ne s'écrasent pas l'un l'autre, et le
+         * fichier final n'apparaît qu'entier (rename est atomique). */
+        $unique = '.' . getmypid() . '-' . bin2hex(random_bytes(4));
         if ($ffmpeg !== '') {
-            $tmp = $_base . '.tmp.wav';
+            $tmp = $_base . $unique . '.wav';
             file_put_contents($tmp, $wav);
             $result = self::run(array($ffmpeg, '-y', '-v', 'error', '-i', $tmp, '-ac', '2', '-ar', '44100', '-b:a', '128k',
-                                      '-f', 'mp3', $_base . '.part'), '', 30);
+                                      '-f', 'mp3', $_base . $unique . '.part'), '', 30);
             @unlink($tmp);
-            if ($result['code'] === 0 && @rename($_base . '.part', $_base . '.mp3')) {
+            if ($result['code'] === 0) {
                 self::remember($_base . '.mp3', $duration);
-                return array('file' => $_base . '.mp3', 'duration' => $duration);
+                if (@rename($_base . $unique . '.part', $_base . '.mp3')) {
+                    return array('file' => $_base . '.mp3', 'duration' => $duration);
+                }
             }
-            @unlink($_base . '.part');
+            @unlink($_base . $unique . '.part');
             log::add('sonosbe', 'debug', 'ffmpeg : ' . self::lastLine($result['stderr']));
         }
-        file_put_contents($_base . '.wav', $wav);
+        file_put_contents($_base . $unique . '.part', $wav);
+        rename($_base . $unique . '.part', $_base . '.wav');
         return array('file' => $_base . '.wav', 'duration' => $duration);
     }
 
@@ -446,6 +457,12 @@ class sonosbeVoice {
     public static function purge() {
         foreach (glob(self::audioDir('rec') . '/*') ?: array() as $file) {
             if (is_file($file) && time() - filemtime($file) > self::REC_SECONDS) {
+                @unlink($file);
+            }
+        }
+        /* Restes d'une synthèse interrompue (processus tué, disque plein). */
+        foreach (glob(self::audioDir('cache') . '/*.part') ?: array() as $file) {
+            if (time() - filemtime($file) > 3600) {
                 @unlink($file);
             }
         }

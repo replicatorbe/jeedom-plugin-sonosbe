@@ -201,7 +201,9 @@ class sonosbeUpnp {
         foreach ($dom->getElementsByTagName('ZoneGroup') as $group) {
             $members = array();
             foreach ($group->getElementsByTagName('ZoneGroupMember') as $member) {
-                if ($member->getAttribute('Invisible') === '1') {
+                /* Invisible : enceinte appairée. IsZoneBridge : Bridge ou
+                 * Boost, qui relaient le réseau Sonos sans jouer de son. */
+                if ($member->getAttribute('Invisible') === '1' || $member->getAttribute('IsZoneBridge') === '1') {
                     continue;
                 }
                 $ip = parse_url($member->getAttribute('Location'), PHP_URL_HOST);

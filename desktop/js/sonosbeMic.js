@@ -38,6 +38,9 @@ if (!window.sonosbeMic) {
     timer: null,
     started: 0,
     cancelled: false,
+    /* Vrai pendant que le navigateur demande l'accès au micro : un second
+       clic à ce moment ouvrirait un second enregistrement. */
+    starting: false,
 
     notify: function (_message, _level) {
       if (window.jeedomUtils && typeof jeedomUtils.showAlert === 'function') {
@@ -52,6 +55,7 @@ if (!window.sonosbeMic) {
     /* Premier clic : enregistre. Second clic, sur le même bouton : envoie.
        Un clic sur un autre bouton pendant l'enregistrement l'annule. */
     toggle: function (_button, _target) {
+      if (this.starting) { return }
       if (this.recorder !== null) {
         if (_button === this.button) {
           this.stop()
@@ -69,7 +73,9 @@ if (!window.sonosbeMic) {
         this.notify('Le micro n\'est accessible que si Jeedom est ouvert en HTTPS (ou depuis la machine elle-même). Ouvrez Jeedom par son adresse https:// pour enregistrer un message.', 'warning')
         return
       }
+      this.starting = true
       navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(function (_stream) {
+        self.starting = false
         var types = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/webm']
         var options = {}
         for (var i = 0; i < types.length; i++) {
@@ -99,6 +105,7 @@ if (!window.sonosbeMic) {
           }
         }, 250)
       }).catch(function (_error) {
+        self.starting = false
         self.notify('Micro indisponible : ' + (_error && _error.message ? _error.message : _error), 'danger')
       })
     },
