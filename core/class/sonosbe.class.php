@@ -61,6 +61,12 @@ class sonosbe extends eqLogic {
      * au-delà, on rend la main même si l'enceinte n'a pas fini. */
     const INTERRUPT_MAX_SECONDS = 120;
 
+    /* À augmenter quand createCommands() ajoute ou modifie des commandes :
+     * le cron les met à jour sur les équipements existants. Une copie des
+     * fichiers (déploiement, installation manuelle) ne passe pas par
+     * sonosbe_update(). */
+    const CMD_VERSION = 3;
+
     const TOPOLOGY_KEY = 'sonosbe::topology';
     const FAVORITES_KEY = 'sonosbe::favorites';
 
@@ -69,6 +75,9 @@ class sonosbe extends eqLogic {
     /* Une fois par minute : la topologie (qui corrige les adresses), puis
      * l'état de chaque enceinte. */
     public static function cron() {
+        if ((int) config::byKey('cmd_version', __CLASS__, 0) !== self::CMD_VERSION) {
+            self::upgradeCommands();
+        }
         $eqLogics = self::configured();
         if (empty($eqLogics)) {
             return;
@@ -99,6 +108,14 @@ class sonosbe extends eqLogic {
             sonosbeVoice::purge();
         } catch (Throwable $e) {
             log::add(__CLASS__, 'debug', __('Purge des fichiers audio :', __FILE__) . ' ' . $e->getMessage());
+        }
+        /* Changement de mois : le compteur OpenAI repart de zéro, même sans
+         * nouvelle annonce. */
+        try {
+            $usage = sonosbeVoice::openaiUsage();
+            sonosbeVoice::saveOpenaiUsage($usage['current'], $usage['previous']);
+        } catch (Throwable $e) {
+            log::add(__CLASS__, 'debug', 'OpenAI : ' . $e->getMessage());
         }
         $eqLogics = self::configured();
         if (empty($eqLogics)) {
@@ -158,6 +175,17 @@ class sonosbe extends eqLogic {
         }
     }
 
+    public static function upgradeCommands() {
+        foreach (self::byType(__CLASS__) as $eqLogic) {
+            try {
+                $eqLogic->createCommands();
+            } catch (Throwable $e) {
+                log::add(__CLASS__, 'error', $eqLogic->getHumanName() . ' : ' . $e->getMessage());
+            }
+        }
+        config::save('cmd_version', self::CMD_VERSION, __CLASS__);
+    }
+
     /* Lignes du plugin dans la page Santé ; rien n'y interroge d'enceinte. */
     public static function health() {
         $eqLogics = self::configured();
@@ -167,7 +195,15 @@ class sonosbe extends eqLogic {
         };
         $engine = (string) config::byKey('tts_engine', __CLASS__, 'piper');
         $problem = sonosbeVoice::engineProblem($engine);
-        return array(
+        $usage = sonosbeVoice::openaiUsage()['current'];
+        $openai = ($engine === 'openai' || $usage['requests'] > 0) ? array(array(
+            'test'   => __('OpenAI ce mois-ci', __FILE__),
+            'result' => sprintf(__('%s caractères, %d requêtes, environ %s $', __FILE__),
+                number_format($usage['chars'], 0, ',', ' '), $usage['requests'], number_format($usage['cost'], 2, ',', ' ')),
+            'advice' => __('Estimation d\'après les tarifs publics d\'OpenAI ; les phrases resservies par le cache ne sont pas comptées.', __FILE__),
+            'state'  => true,
+        )) : array();
+        return array_merge(array(
             array(
                 'test'   => __('Enceintes joignables', __FILE__),
                 'result' => (count($eqLogics) - count($offline)) . '/' . count($eqLogics) . (empty($offline) ? '' : ' — ' . $names($offline)),
@@ -180,7 +216,7 @@ class sonosbe extends eqLogic {
                 'advice' => $problem === '' ? '' : __('Voir la configuration du plugin.', __FILE__),
                 'state'  => $problem === '',
             ),
-        );
+        ), $openai);
     }
 
     /* Jeedom peut se servir du plugin comme moteur de synthèse vocale pour
@@ -873,7 +909,8 @@ class sonosbe extends eqLogic {
             case 'prepare':
                 /* La voix est fabriquée et gardée en cache, sans être jouée :
                  * l'annonce qui suivra partira sans attendre la synthèse. */
-                sonosbeVoice::speak($message);
+                $prepared = sonosbeVoice::titleOptions($title);
+                sonosbeVoice::speak($message, array('voice' => $prepared['voice'], 'tone' => $prepared['tone']));
                 return;
             case 'micro':
                 throw new Exception(__('« Message vocal » s\'utilise depuis le dashboard : un clic pour enregistrer, un second pour envoyer.', __FILE__));
@@ -1091,10 +1128,28 @@ class sonosbe extends eqLogic {
      * a retenu l'annonce, ce qui n'est pas une erreur pour un scénario.
      */
     public function playClip($_clip, $_opts = array()) {
-        $opts = $_opts + array('title' => '', 'label' => '', 'manual' => false, 'remember' => true);
+        $opts = $_opts + array('title' => '', 'label' => '', 'manual' => false, 'remember' => true, 'voice' => '');
         if ($this->isAll()) {
             return $this->playClipEverywhere($_clip, $opts);
         }
+        /* Chaque annonce laisse une ligne dans l'historique, réussie,
+         * retenue ou en échec ; pas le test d'accès (remember à false). */
+        $entry = array('label' => $opts['label'], 'voice' => $opts['voice'], 'manual' => $opts['manual']);
+        try {
+            $result = $this->playClipHere($_clip, $opts);
+        } catch (Throwable $e) {
+            if ($opts['remember']) {
+                $this->recordHistory($entry + array('method' => 'failed', 'error' => $e->getMessage()));
+            }
+            throw $e;
+        }
+        if ($opts['remember']) {
+            $this->recordHistory($entry + $result);
+        }
+        return $result;
+    }
+
+    private function playClipHere($_clip, $opts) {
         $title = sonosbeVoice::titleOptions($opts['title']);
         $volume = $title['volume'] !== null ? $title['volume'] : $this->defaultAnnounceVolume();
         $chime = $title['chime'] !== null ? $title['chime'] : (int) $this->getConfiguration('announce_chime', 0) === 1;
@@ -1102,7 +1157,7 @@ class sonosbe extends eqLogic {
         if (!$title['urgent'] && sonosbeVoice::nightActive()) {
             if (!$opts['manual'] && (int) config::byKey('night_block', __CLASS__, 0) === 1) {
                 log::add(__CLASS__, 'info', sprintf(__('%s : annonce retenue, plage de nuit (« %s »)', __FILE__), $this->getHumanName(), $opts['label']));
-                return array('method' => 'blocked', 'url' => '');
+                return array('method' => 'blocked', 'url' => '', 'volume' => $volume, 'chime' => $chime);
             }
             $volume = min($volume, sonosbeVoice::nightVolume());
         }
@@ -1148,7 +1203,57 @@ class sonosbe extends eqLogic {
         log::add(__CLASS__, 'info', sprintf('%s : %s « %s » (volume %d%s)', $this->getHumanName(),
             $used === 'clip' ? __('annonce', __FILE__) : __('annonce avec interruption', __FILE__), $opts['label'], $volume,
             $chime ? ', ' . __('carillon', __FILE__) : ''));
-        return array('method' => $used, 'url' => end($items)['url']);
+        return array('method' => $used, 'url' => end($items)['url'], 'volume' => $volume, 'chime' => $chime);
+    }
+
+    /* ========================================================= HISTORIQUE */
+
+    const HISTORY_SIZE = 20;
+
+    private function recordHistory($_entry) {
+        $history = $this->getCache('history', array());
+        if (!is_array($history)) {
+            $history = array();
+        }
+        $label = (string) $_entry['label'];
+        if (function_exists('mb_substr') && mb_strlen($label, 'UTF-8') > 200) {
+            $label = mb_substr($label, 0, 200, 'UTF-8') . '…';
+        }
+        array_unshift($history, array(
+            'at'     => date('Y-m-d H:i:s'),
+            'label'  => $label,
+            'method' => (string) $_entry['method'],
+            'volume' => isset($_entry['volume']) ? (int) $_entry['volume'] : null,
+            'chime'  => !empty($_entry['chime']),
+            'voice'  => (string) $_entry['voice'],
+            'manual' => !empty($_entry['manual']),
+            'detail' => isset($_entry['error']) ? (string) $_entry['error'] : (isset($_entry['detail']) ? (string) $_entry['detail'] : ''),
+        ));
+        $this->setCache('history', array_slice($history, 0, self::HISTORY_SIZE));
+    }
+
+    public function history() {
+        $history = $this->getCache('history', array());
+        return is_array($history) ? $history : array();
+    }
+
+    /* Voix utilisée, en clair, pour l'historique : « OpenAI · onyx · ton
+     * enjoué · cache ». */
+    public static function describeVoice($_clip) {
+        if (!isset($_clip['engine'])) {
+            return '';
+        }
+        $parts = array(sonosbeVoice::engineName($_clip['engine']));
+        if (!empty($_clip['voice'])) {
+            $parts[] = isset(sonosbeVoice::VOICES[$_clip['voice']]) ? sonosbeVoice::VOICES[$_clip['voice']]['name'] : $_clip['voice'];
+        }
+        if (!empty($_clip['tone'])) {
+            $parts[] = __('ton', __FILE__) . ' ' . $_clip['tone'];
+        }
+        if (!empty($_clip['cached'])) {
+            $parts[] = __('cache', __FILE__);
+        }
+        return implode(' · ', $parts);
     }
 
     public function defaultAnnounceVolume() {
@@ -1161,8 +1266,10 @@ class sonosbe extends eqLogic {
         if ($text === '') {
             throw new Exception(__('Aucun texte à annoncer.', __FILE__));
         }
-        $clip = sonosbeVoice::speak($text);
-        return $this->playClip($clip, array('title' => $_title, 'label' => $text, 'manual' => $_manual));
+        $options = sonosbeVoice::titleOptions($_title);
+        $clip = sonosbeVoice::speak($text, array('voice' => $options['voice'], 'tone' => $options['tone']));
+        return $this->playClip($clip, array('title' => $_title, 'label' => $text, 'manual' => $_manual,
+                                            'voice' => self::describeVoice($clip)));
     }
 
     /* Un son par son URL, ou un fichier de la machine Jeedom, que l'on copie
@@ -1187,7 +1294,8 @@ class sonosbe extends eqLogic {
     /* La dernière annonce, gardée pour « Rejouer la dernière annonce ». Le
      * fichier est déjà là : rien n'est refabriqué. */
     private function rememberClip($_clip, $_opts) {
-        $this->setCache('last_clip', array('clip' => $_clip, 'title' => (string) $_opts['title'], 'label' => (string) $_opts['label']));
+        $this->setCache('last_clip', array('clip' => $_clip, 'title' => (string) $_opts['title'], 'label' => (string) $_opts['label'],
+                                           'voice' => (string) $_opts['voice']));
         $this->publishCmd('announce_last', $_opts['label']);
     }
 
@@ -1197,7 +1305,8 @@ class sonosbe extends eqLogic {
             throw new Exception(__('Aucune annonce à rejouer.', __FILE__));
         }
         /* Rejouer, c'est quelqu'un qui n'a pas entendu : pas bloqué la nuit. */
-        return $this->playClip($last['clip'], array('title' => $last['title'], 'label' => $last['label'], 'manual' => true));
+        return $this->playClip($last['clip'], array('title' => $last['title'], 'label' => $last['label'], 'manual' => true,
+                                                    'voice' => (isset($last['voice']) ? $last['voice'] . ' · ' : '') . __('rejouée', __FILE__)));
     }
 
     /* ======================================================= TEST D'ACCÈS */
@@ -1332,11 +1441,21 @@ class sonosbe extends eqLogic {
                 log::add(__CLASS__, 'warning', $player->getHumanName() . ' : ' . $e->getMessage());
             }
         }
+        $detail = array();
+        foreach ($results as $name => $method) {
+            $detail[] = $name . ' : ' . $method;
+        }
+        $entry = array('label' => $_opts['label'], 'voice' => $_opts['voice'], 'manual' => $_opts['manual'],
+                       'detail' => implode(', ', array_merge($detail, $errors)));
         if (empty($results)) {
+            if ($_opts['remember']) {
+                $this->recordHistory($entry + array('method' => 'failed'));
+            }
             throw new Exception(__('Aucune enceinte n\'a pu faire l\'annonce.', __FILE__) . ' ' . implode(' ; ', $errors));
         }
         if ($_opts['remember']) {
             $this->rememberClip($_clip, $_opts);
+            $this->recordHistory($entry + array('method' => 'all'));
         }
         return array('method' => 'all', 'players' => $results, 'errors' => $errors, 'url' => '');
     }
@@ -1593,7 +1712,7 @@ class sonosbe extends eqLogic {
      * titre porte le volume et des mots-clés (carillon, sans-carillon,
      * urgent). */
     private function createVoiceCommands() {
-        $options = __('Volume et options : 40 carillon urgent', __FILE__);
+        $options = __('Options : 40 carillon urgent voix=onyx ton=enjoué', __FILE__);
         $this->addCmdIfMissing('announce_last', 'Dernière annonce', 'info', 'string', array('order' => 17));
         $this->addCmdIfMissing('announce', 'Annonce', 'action', 'message', array('order' => 113, 'isVisible' => 1,
             'display' => array('title_placeholder' => $options, 'message_placeholder' => __('Texte à dire', __FILE__))));
@@ -1604,8 +1723,40 @@ class sonosbe extends eqLogic {
             'template' => 'sonosbe::micro'));
         $this->addCmdIfMissing('replay', 'Rejouer la dernière annonce', 'action', 'other', array('order' => 140,
             'display' => array('icon' => '<i class="fas fa-redo"></i>')));
-        $this->addCmdIfMissing('prepare', 'Préparer une annonce', 'action', 'message', array('order' => 141,
-            'display' => array('title_disable' => 1, 'message_placeholder' => __('Texte à fabriquer à l\'avance, sans le jouer', __FILE__))));
+        $prepare = $this->addCmdIfMissing('prepare', 'Préparer une annonce', 'action', 'message', array('order' => 141,
+            'display' => array('title_placeholder' => __('Voix et ton, comme l\'annonce : voix=onyx ton=enjoué', __FILE__),
+                               'message_placeholder' => __('Texte à fabriquer à l\'avance, sans le jouer', __FILE__))));
+        /* Jusqu'à la 0.2.1 : titre désactivé sur « Préparer », et indication
+         * de titre sans voix ni ton. Mis à jour une fois, sans toucher à ce
+         * que l'utilisateur aurait réglé lui-même. */
+        if ((int) $prepare->getDisplay('title_disable', 0) === 1) {
+            $prepare->setDisplay('title_disable', 0);
+            $prepare->setDisplay('title_placeholder', __('Voix et ton, comme l\'annonce : voix=onyx ton=enjoué', __FILE__));
+            $prepare->save();
+        }
+        foreach (array('announce', 'play_url') as $logicalId) {
+            $cmd = $this->getCmd('action', $logicalId);
+            if (is_object($cmd) && $cmd->getDisplay('title_placeholder', '') === __('Volume et options : 40 carillon urgent', __FILE__)) {
+                $cmd->setDisplay('title_placeholder', $options);
+                $cmd->save();
+            }
+        }
+        /* Suivi d'OpenAI : sur l'équipement du plugin, une fois. */
+        if ($this->isAll()) {
+            $this->addCmdIfMissing('openai_chars', 'OpenAI caractères du mois', 'info', 'numeric', array('order' => 150, 'min' => 0));
+            $this->addCmdIfMissing('openai_cost', 'OpenAI coût estimé du mois', 'info', 'numeric', array('order' => 151, 'unite' => '$', 'min' => 0));
+        }
+    }
+
+    /* Appelée à chaque synthèse OpenAI, et chaque heure pour le changement
+     * de mois. */
+    public static function publishOpenaiUsage($_current) {
+        $all = self::allEquipment();
+        if (!is_object($all)) {
+            return;
+        }
+        $all->publishCmd('openai_chars', (int) $_current['chars']);
+        $all->publishCmd('openai_cost', round((float) $_current['cost'], 2));
     }
 
     private function addCmdIfMissing($_logicalId, $_name, $_type, $_subType, $_options = array()) {
@@ -1650,8 +1801,9 @@ class sonosbe extends eqLogic {
 
     public function toAjax() {
         if ($this->isAll()) {
-            return array('id' => $this->getId(), 'all' => true,
-                         'players' => array_map(function ($eq) { return $eq->getName(); }, self::configured()));
+            return array('id' => $this->getId(), 'all' => true, 'history' => $this->history(),
+                         'players' => array_map(function ($eq) { return $eq->getName(); }, self::configured()),
+                         'openai' => sonosbeVoice::openaiUsage());
         }
         $group = $this->group();
         $caps = array_values(array_filter(explode(',', (string) $this->getConfiguration('capabilities', ''))));
@@ -1668,6 +1820,7 @@ class sonosbe extends eqLogic {
             'homeTheater'  => $this->isHomeTheater(),
             'capabilities' => $caps,
             'favorites'    => count(self::favorites()),
+            'history'      => $this->history(),
             'announceUrl'  => sonosbeVoice::baseUrl(),
         );
     }

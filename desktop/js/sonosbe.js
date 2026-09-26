@@ -254,6 +254,7 @@ function sonosbeRender(_data) {
     sonosbeText('pre_sonosbeRaw', '')
     return
   }
+  sonosbeRenderHistory(_data.history || [])
   if (_data.all) {
     var players = _data.players || []
     state.className = players.length > 0 ? 'alert alert-success' : 'alert alert-warning'
@@ -293,6 +294,36 @@ function sonosbeRender(_data) {
   if (n.at) { lines.push('<small>{{Relevé le}} ' + sonosbeEscape(n.at) + '</small>') }
   now.innerHTML = lines.join('<br>')
   sonosbeText('pre_sonosbeRaw', JSON.stringify(_data, null, 2))
+}
+
+/* Les 20 dernières annonces : ce qu'un scénario a fait dire, ou pas. */
+function sonosbeRenderHistory(_history) {
+  var target = sonosbeEl('div_sonosbeHistory')
+  if (target === null) { return }
+  if (_history.length === 0) {
+    target.innerHTML = '<p class="text-muted">{{Aucune annonce depuis le dernier redémarrage de Jeedom.}}</p>'
+    return
+  }
+  var methods = {
+    clip: '<span class="label label-success">{{par-dessus le son}}</span>',
+    interrupt: '<span class="label label-info">{{avec interruption}}</span>',
+    all: '<span class="label label-success">{{toutes les enceintes}}</span>',
+    blocked: '<span class="label label-warning">{{retenue (nuit)}}</span>',
+    failed: '<span class="label label-danger">{{échec}}</span>'
+  }
+  var html = '<table class="table table-condensed table-bordered"><thead><tr>'
+    + '<th style="width:150px;">{{Quand}}</th><th>{{Annonce}}</th><th style="width:70px;">{{Volume}}</th>'
+    + '<th style="width:170px;">{{Résultat}}</th><th>{{Voix}}</th></tr></thead><tbody>'
+  _history.forEach(function (_h) {
+    html += '<tr><td>' + sonosbeEscape(_h.at) + '</td>'
+      + '<td>' + sonosbeEscape(_h.label) + (_h.chime ? ' <i class="fas fa-bell" title="{{carillon}}"></i>' : '')
+      + (_h.manual ? ' <i class="fas fa-hand-pointer" title="{{déclenchée à la main}}"></i>' : '')
+      + (_h.detail ? '<br><small class="text-muted">' + sonosbeEscape(_h.detail) + '</small>' : '') + '</td>'
+      + '<td>' + (_h.volume === null ? '' : sonosbeEscape(_h.volume)) + '</td>'
+      + '<td>' + (methods[_h.method] || sonosbeEscape(_h.method)) + '</td>'
+      + '<td><small>' + sonosbeEscape(_h.voice) + '</small></td></tr>'
+  })
+  target.innerHTML = html + '</tbody></table>'
 }
 
 function sonosbeRefresh() {

@@ -74,9 +74,15 @@ Commande **Annonce** de l'enceinte :
 | `carillon` | un « ding-dong » avant le message |
 | `sans-carillon` | pas de carillon, même s'il est coché sur l'équipement |
 | `urgent` | passe outre la plage de nuit : volume normal, jamais retenue |
+| `voix=onyx` | une autre voix pour cette annonce : une voix OpenAI (alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer…) ou Piper (siwis, tom, jessica, pierre, gilles). La voix choisit le moteur. |
+| `ton=enjoué` | le ton de la voix, OpenAI seulement : enjoué, joyeux, sérieux, calme, doux, chuchoté, alerte, solennel, dynamique, ou tout autre mot (`ton=malicieux`) |
 
-Exemple pour une alarme : titre `70 carillon urgent`, message `Fumée détectée
-dans la cuisine`.
+Exemple pour une alarme : titre `70 carillon urgent voix=onyx ton=alerte`,
+message `Fumée détectée dans la cuisine`. Pour un anniversaire :
+`ton=joyeux voix=nova`.
+
+Chaque combinaison de voix et de ton a sa propre place dans le cache :
+**Préparer une annonce** accepte les mêmes `voix=` et `ton=` dans son titre.
 
 Commande **Jouer un son** : même principe, avec dans le message une URL
 `http://…` ou le chemin d'un fichier audio de la machine Jeedom.
@@ -147,6 +153,24 @@ HTTPS seulement…), renseignez **Adresse de Jeedom pour les enceintes** dans
 la configuration du plugin, en `http://`. Les fichiers audio portent des noms
 aléatoires ; les messages enregistrés sont effacés au bout d'un jour, le cache
 des synthèses est limité à 150 Mo.
+
+### Suivi d'OpenAI
+
+La configuration du plugin affiche ce qu'OpenAI a fabriqué ce mois-ci et le
+mois précédent : caractères envoyés, requêtes, minutes de voix, et un coût
+estimé d'après les tarifs publics d'OpenAI (sa facture fait foi). Les phrases
+resservies par le cache ne comptent pas : elles ne repartent pas chez
+OpenAI. L'équipement **Toutes les enceintes** porte les mêmes chiffres en
+commandes info (« OpenAI caractères du mois », « OpenAI coût estimé du
+mois »), pour un scénario d'alerte ou un historique ; la page Santé les
+reprend.
+
+### Historique
+
+L'onglet **Diagnostic** de chaque enceinte, et de « Toutes les enceintes »,
+liste les 20 dernières annonces : heure, texte, volume, voix, et ce qui s'est
+passé (par-dessus le son, avec interruption, retenue la nuit, échec et sa
+raison). L'historique repart à zéro au redémarrage de Jeedom.
 
 ## Moteur de synthèse vocale de Jeedom
 

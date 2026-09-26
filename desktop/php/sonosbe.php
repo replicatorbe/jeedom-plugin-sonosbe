@@ -276,6 +276,8 @@ $eqLogics = eqLogic::byType($plugin->getId());
 				<br>
 				<div class="col-xs-12">
 					<div class="alert alert-info" id="div_sonosbeState">{{Chargement…}}</div>
+					<legend><i class="fas fa-history"></i> {{Dernières annonces}}</legend>
+					<div id="div_sonosbeHistory"></div>
 					<legend><i class="fas fa-code"></i> {{Dernier relevé}}</legend>
 					<pre id="pre_sonosbeRaw" style="max-height:520px;overflow:auto;"></pre>
 				</div>

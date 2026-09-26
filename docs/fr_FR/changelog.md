@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 — 26/09/2026
+
+- Voix et ton par annonce, dans le titre : `voix=onyx`, `voix=pierre`,
+  `ton=enjoué`, `ton=alerte`… La voix choisit le moteur (OpenAI ou Piper) ;
+  le ton est une consigne pour OpenAI. « Préparer une annonce » les accepte
+  aussi.
+- Suivi d'OpenAI : caractères, requêtes, minutes de voix et coût estimé du
+  mois en cours et du précédent, dans la configuration, la page Santé et deux
+  infos de « Toutes les enceintes ».
+- Historique des 20 dernières annonces dans l'onglet Diagnostic.
+- Commandes existantes mises à jour par le cron après une copie des fichiers,
+  sans attendre une mise à jour du plugin par Jeedom.
+
 ## 0.2.1 — 26/09/2026
 
 - Recherche des enceintes : elle ne partait pas quand on validait le champ

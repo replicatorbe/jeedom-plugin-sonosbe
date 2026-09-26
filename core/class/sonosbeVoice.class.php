@@ -115,42 +115,97 @@ class sonosbeVoice {
     /* ============================================================= SYNTHÈSE */
 
     /*
-     * Texte => fichier prêt à jouer : array(file, duration, engine). Le
-     * moteur choisi d'abord ; l'autre s'il échoue et qu'il est prêt.
+     * Texte => fichier prêt à jouer : array(file, duration, engine, voice,
+     * tone, cached). Le moteur choisi d'abord ; l'autre s'il échoue et
+     * qu'il est prêt.
+     *
+     * $_overrides vient du titre de l'annonce (titleOptions) : « voice » (une
+     * voix Piper ou OpenAI, qui décide alors du moteur) et « tone » (une
+     * consigne de ton, comprise par OpenAI seulement).
      */
-    public static function speak($_text) {
+    public static function speak($_text, $_overrides = array()) {
         $text = self::cleanText($_text);
         if ($text === '') {
             throw new Exception(__('Aucun texte à dire.', __FILE__));
         }
-        $engines = array((string) config::byKey('tts_engine', 'sonosbe', 'piper'));
+        $overrides = $_overrides + array('voice' => null, 'tone' => null);
+        $wanted = $overrides['voice'] !== null ? self::resolveVoice($overrides['voice']) : null;
+        if ($overrides['voice'] !== null && $wanted === null) {
+            log::add('sonosbe', 'warning', sprintf(__('Voix inconnue « %s » : voix par défaut.', __FILE__), $overrides['voice']));
+        }
+        $first = $wanted !== null ? $wanted['engine'] : (string) config::byKey('tts_engine', 'sonosbe', 'piper');
+        $engines = array($first);
         if (config::byKey('tts_fallback', 'sonosbe', 1) == 1) {
-            $engines[] = $engines[0] === 'openai' ? 'piper' : 'openai';
+            $engines[] = $first === 'openai' ? 'piper' : 'openai';
         }
         $errors = array();
         foreach ($engines as $engine) {
-            if (!self::engineReady($engine)) {
-                $errors[] = self::engineName($engine) . ' : ' . self::engineProblem($engine);
+            /* La voix demandée ne vaut que pour son moteur ; le moteur de
+             * secours parle avec sa voix habituelle. */
+            $params = self::engineParams($engine, ($wanted !== null && $wanted['engine'] === $engine) ? $wanted['voice'] : null, $overrides['tone']);
+            $problem = self::engineProblem($engine, $params['voice']);
+            if ($problem !== '') {
+                $errors[] = self::engineName($engine) . ' : ' . $problem;
                 continue;
             }
-            $key = sha1(self::secret() . '|' . $engine . '|' . self::engineSignature($engine) . '|' . $text);
+            $key = sha1(self::secret() . '|' . $engine . '|' . implode('|', $params) . '|' . $text);
+            $about = array('engine' => $engine, 'voice' => $params['voice'], 'tone' => $engine === 'openai' ? (string) $overrides['tone'] : '');
             $cached = self::cached($key);
             if ($cached !== null) {
                 touch($cached['file']);
-                return $cached + array('engine' => $engine, 'cached' => true);
+                return $cached + $about + array('cached' => true);
             }
             try {
                 $started = microtime(true);
-                $wav = $engine === 'openai' ? self::openaiWav($text) : self::piperWav($text);
+                $wav = $engine === 'openai'
+                    ? self::openaiWav($text, $params['voice'], $params['instructions'])
+                    : self::piperWav($text, $params['voice']);
                 $clip = self::store($wav, self::audioDir('cache') . '/' . $key);
-                log::add('sonosbe', 'debug', sprintf('%s : %.1f s de voix en %.2f s', self::engineName($engine), $clip['duration'], microtime(true) - $started));
-                return $clip + array('engine' => $engine, 'cached' => false);
+                if ($engine === 'openai') {
+                    self::recordOpenaiUsage($text, $clip['duration']);
+                }
+                log::add('sonosbe', 'debug', sprintf('%s (%s) : %.1f s de voix en %.2f s', self::engineName($engine), $params['voice'],
+                    $clip['duration'], microtime(true) - $started));
+                return $clip + $about + array('cached' => false);
             } catch (Throwable $e) {
                 $errors[] = self::engineName($engine) . ' : ' . $e->getMessage();
                 log::add('sonosbe', 'warning', __('Synthèse vocale en échec', __FILE__) . ' — ' . end($errors));
             }
         }
         throw new Exception(__('Synthèse vocale impossible.', __FILE__) . ' ' . implode(' ; ', $errors));
+    }
+
+    /*
+     * Ce qui change le son produit, moteur par moteur ; fait aussi partie de
+     * la clé du cache. Voix : celle demandée, sinon celle de la
+     * configuration.
+     */
+    private static function engineParams($_engine, $_voice, $_tone) {
+        if ($_engine === 'openai') {
+            return array(
+                'model'        => self::openaiModel(),
+                'voice'        => $_voice !== null ? $_voice : self::openaiVoice(),
+                'instructions' => self::openaiInstructions($_tone),
+            );
+        }
+        return array('voice' => $_voice !== null ? $_voice : self::piperVoice(), 'speed' => (string) self::piperSpeed());
+    }
+
+    /* Une voix nommée dans un titre : Piper (par sa clé ou son prénom) ou
+     * OpenAI. Null si inconnue. */
+    public static function resolveVoice($_name) {
+        $name = strtolower(trim((string) $_name));
+        $aliases = array('jessica' => 'upmc:jessica', 'pierre' => 'upmc:pierre');
+        if (isset($aliases[$name])) {
+            $name = $aliases[$name];
+        }
+        if (isset(self::VOICES[$name])) {
+            return array('engine' => 'piper', 'voice' => $name);
+        }
+        if (in_array($name, self::OPENAI_VOICES, true)) {
+            return array('engine' => 'openai', 'voice' => $name);
+        }
+        return null;
     }
 
     /* Une ligne, sans balisage ni caractères de contrôle : Piper lit une
@@ -175,25 +230,20 @@ class sonosbeVoice {
         return self::engineProblem($_engine) === '';
     }
 
-    public static function engineProblem($_engine) {
+    /* Ce qui empêche ce moteur de parler, avec cette voix Piper s'il y en a
+     * une de demandée ; '' s'il est prêt. */
+    public static function engineProblem($_engine, $_voice = null) {
         if ($_engine === 'openai') {
             return trim((string) config::byKey('openai_key', 'sonosbe', '')) === '' ? __('aucune clé API', __FILE__) : '';
         }
         if (!is_executable(self::piperBinary())) {
             return __('Piper n\'est pas téléchargé', __FILE__);
         }
-        if (!is_file(self::voiceModel(self::piperVoice()))) {
-            return sprintf(__('la voix %s n\'est pas téléchargée', __FILE__), self::VOICES[self::piperVoice()]['name']);
+        $voice = ($_voice !== null && isset(self::VOICES[$_voice])) ? $_voice : self::piperVoice();
+        if (!is_file(self::voiceModel($voice))) {
+            return sprintf(__('la voix %s n\'est pas téléchargée', __FILE__), self::VOICES[$voice]['name']);
         }
         return '';
-    }
-
-    /* Ce qui change le son produit : fait partie de la clé du cache. */
-    private static function engineSignature($_engine) {
-        if ($_engine === 'openai') {
-            return implode('|', array(self::openaiModel(), self::openaiVoice(), (string) config::byKey('openai_instructions', 'sonosbe', '')));
-        }
-        return self::piperVoice() . '|' . self::piperSpeed();
     }
 
     /* Sel des noms de fichiers : un texte connu ne donne pas l'adresse de
@@ -243,10 +293,11 @@ class sonosbeVoice {
         return max(50, min(200, $speed > 0 ? $speed : 100));
     }
 
-    public static function piperWav($_text) {
-        $voice = self::VOICES[self::piperVoice()];
+    public static function piperWav($_text, $_voice = null) {
+        $key = ($_voice !== null && isset(self::VOICES[$_voice])) ? $_voice : self::piperVoice();
+        $voice = self::VOICES[$key];
         $out = tempnam(jeedom::getTmpFolder('sonosbe'), 'piper');
-        $command = array(self::piperBinary(), '--model', self::voiceModel(self::piperVoice()), '--output_file', $out,
+        $command = array(self::piperBinary(), '--model', self::voiceModel($key), '--output_file', $out,
                          '--length_scale', sprintf('%.2F', 100 / self::piperSpeed()));
         if ($voice['speaker'] !== null) {
             $command[] = '--speaker';
@@ -276,9 +327,46 @@ class sonosbeVoice {
         return $voice !== '' ? $voice : self::OPENAI_VOICE;
     }
 
-    public static function openaiWav($_text) {
-        $body = array('model' => self::openaiModel(), 'voice' => self::openaiVoice(), 'input' => $_text, 'response_format' => 'wav');
-        $instructions = trim((string) config::byKey('openai_instructions', 'sonosbe', ''));
+    /* Tons prêts à l'emploi pour « ton=… » ; un autre mot est passé tel
+     * quel (« ton=malicieux » : « Parle d'un ton malicieux. »). Clés sans
+     * accents : « ton=enjoue » vaut « ton=enjoué ». */
+    const TONES = array(
+        'enjoue'    => 'Parle d\'un ton enjoué et chaleureux, avec le sourire.',
+        'joyeux'    => 'Parle d\'un ton joyeux et enthousiaste.',
+        'serieux'   => 'Parle d\'un ton sérieux et posé, sans émotion superflue.',
+        'calme'     => 'Parle calmement, d\'une voix douce et posée.',
+        'doux'      => 'Parle doucement, d\'une voix douce et apaisante.',
+        'chuchote'  => 'Chuchote, d\'une voix très douce, comme pour ne réveiller personne.',
+        'alerte'    => 'Parle d\'un ton ferme et pressant, comme une alerte, sans crier.',
+        'solennel'  => 'Parle d\'un ton solennel.',
+        'dynamique' => 'Parle d\'un ton dynamique et entraînant.',
+    );
+
+    public static function toneInstruction($_tone) {
+        $tone = trim((string) $_tone);
+        if ($tone === '') {
+            return '';
+        }
+        $key = strtolower(self::stripAccents($tone));
+        return isset(self::TONES[$key]) ? self::TONES[$key] : 'Parle d\'un ton ' . $tone . '.';
+    }
+
+    /* Consigne envoyée à OpenAI : celle de la configuration, puis le ton de
+     * l'annonce. */
+    public static function openaiInstructions($_tone = null) {
+        return trim(trim((string) config::byKey('openai_instructions', 'sonosbe', '')) . ' ' . self::toneInstruction($_tone));
+    }
+
+    public static function stripAccents($_text) {
+        $from = array('à', 'â', 'ä', 'é', 'è', 'ê', 'ë', 'î', 'ï', 'ô', 'ö', 'ù', 'û', 'ü', 'ç', 'À', 'Â', 'É', 'È', 'Ê', 'Î', 'Ô', 'Ù', 'Û', 'Ç');
+        $to = array('a', 'a', 'a', 'e', 'e', 'e', 'e', 'i', 'i', 'o', 'o', 'u', 'u', 'u', 'c', 'A', 'A', 'E', 'E', 'E', 'I', 'O', 'U', 'U', 'C');
+        return str_replace($from, $to, (string) $_text);
+    }
+
+    public static function openaiWav($_text, $_voice = null, $_instructions = null) {
+        $body = array('model' => self::openaiModel(), 'voice' => $_voice !== null ? $_voice : self::openaiVoice(),
+                      'input' => $_text, 'response_format' => 'wav');
+        $instructions = $_instructions !== null ? trim((string) $_instructions) : self::openaiInstructions();
         /* Seuls les modèles « gpt-…-tts » acceptent des consignes de ton. */
         if ($instructions !== '' && strpos(self::openaiModel(), 'gpt-') === 0) {
             $body['instructions'] = $instructions;
@@ -465,6 +553,75 @@ class sonosbeVoice {
              . 'data' . pack('V', strlen($data)) . $data;
     }
 
+    /* ======================================================= USAGE OPENAI */
+
+    /*
+     * Ce qu'OpenAI a réellement fabriqué ce mois-ci : caractères envoyés,
+     * requêtes, secondes de voix, coût estimé. Une phrase resservie par le
+     * cache n'y figure pas : elle n'est pas repartie chez OpenAI.
+     *
+     * Le coût est une estimation, en dollars, d'après les tarifs publics
+     * d'OpenAI : 15 $ le million de caractères pour tts-1, 30 $ pour
+     * tts-1-hd, et environ 0,015 $ la minute de voix pour gpt-4o-mini-tts.
+     * La facture d'OpenAI fait foi.
+     */
+    const OPENAI_PRICES = array(
+        'tts-1'    => array('per_million_chars' => 15.0),
+        'tts-1-hd' => array('per_million_chars' => 30.0),
+        'default'  => array('per_minute' => 0.015),
+    );
+
+    public static function estimateCost($_model, $_chars, $_seconds) {
+        $price = isset(self::OPENAI_PRICES[$_model]) ? self::OPENAI_PRICES[$_model] : self::OPENAI_PRICES['default'];
+        return isset($price['per_million_chars'])
+            ? $_chars * $price['per_million_chars'] / 1000000
+            : $_seconds / 60 * $price['per_minute'];
+    }
+
+    /* Le mois en cours, et le précédent. Un changement de mois bascule le
+     * compteur, même sans nouvelle annonce (appelée chaque heure). */
+    public static function openaiUsage($_month = null) {
+        $month = $_month !== null ? $_month : date('Y-m');
+        /* config::byKey décode lui-même une valeur JSON : on reçoit un
+         * tableau, pas un texte. */
+        $usage = config::byKey('openai_usage', 'sonosbe', '');
+        if (is_string($usage)) {
+            $usage = json_decode($usage, true);
+        }
+        $empty = array('month' => $month, 'chars' => 0, 'requests' => 0, 'seconds' => 0.0, 'cost' => 0.0);
+        if (!is_array($usage) || !isset($usage['month'])) {
+            return array('current' => $empty, 'previous' => null);
+        }
+        if ($usage['month'] !== $month) {
+            $previous = $usage;
+            unset($previous['previous']);
+            return array('current' => $empty, 'previous' => $previous);
+        }
+        $previous = isset($usage['previous']) ? $usage['previous'] : null;
+        unset($usage['previous']);
+        return array('current' => $usage + $empty, 'previous' => $previous);
+    }
+
+    public static function recordOpenaiUsage($_text, $_seconds) {
+        $usage = self::openaiUsage();
+        $chars = function_exists('mb_strlen') ? mb_strlen($_text, 'UTF-8') : strlen($_text);
+        $current = $usage['current'];
+        $current['chars'] += $chars;
+        $current['requests'] += 1;
+        $current['seconds'] = round($current['seconds'] + $_seconds, 1);
+        $current['cost'] = round($current['cost'] + self::estimateCost(self::openaiModel(), $chars, $_seconds), 4);
+        self::saveOpenaiUsage($current, $usage['previous']);
+        return $current;
+    }
+
+    public static function saveOpenaiUsage($_current, $_previous) {
+        config::save('openai_usage', $_current + array('previous' => $_previous), 'sonosbe');
+        /* Les infos de l'équipement « Toutes les enceintes », s'il existe. */
+        if (class_exists('sonosbe', false)) {
+            sonosbe::publishOpenaiUsage($_current);
+        }
+    }
+
     /* ============================================================= OPTIONS */
 
     /*
@@ -474,11 +631,13 @@ class sonosbeVoice {
      * l'équipement) et urgent (passe outre la plage de nuit).
      */
     public static function titleOptions($_title) {
-        $options = array('volume' => null, 'chime' => null, 'urgent' => false);
+        $options = array('volume' => null, 'chime' => null, 'urgent' => false, 'voice' => null, 'tone' => null);
         $title = function_exists('mb_strtolower') ? mb_strtolower((string) $_title, 'UTF-8') : strtolower((string) $_title);
         foreach (preg_split('/[\s,;]+/u', trim($title)) as $word) {
             $number = rtrim($word, '%');
-            if ($number !== '' && is_numeric($number)) {
+            if (preg_match('/^(voix|voice|ton|tone)[=:](.+)$/u', $word, $m)) {
+                $options[in_array($m[1], array('voix', 'voice'), true) ? 'voice' : 'tone'] = $m[2];
+            } elseif ($number !== '' && is_numeric($number)) {
                 $options['volume'] = max(0, min(100, (int) round((float) $number)));
             } elseif (in_array($word, array('carillon', 'ding', 'chime'), true)) {
                 $options['chime'] = true;
@@ -671,6 +830,7 @@ class sonosbeVoice {
             'engine'    => (string) config::byKey('tts_engine', 'sonosbe', 'piper'),
             'problem'   => self::engineProblem((string) config::byKey('tts_engine', 'sonosbe', 'piper')),
             'baseUrl'   => self::baseUrl(),
+            'openai'    => self::openaiUsage(),
         );
     }
 

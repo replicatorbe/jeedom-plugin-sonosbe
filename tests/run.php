@@ -233,14 +233,44 @@ check('entités', sonosbeVoice::cleanText('Porte d&#39;entr&eacute;e'), 'Porte d
 check('texte vide', sonosbeVoice::cleanText(" \n "), '');
 
 section('Titre d\'une annonce');
-check('vide : réglages de l\'équipement', sonosbeVoice::titleOptions(''), array('volume' => null, 'chime' => null, 'urgent' => false));
+$none = array('volume' => null, 'chime' => null, 'urgent' => false, 'voice' => null, 'tone' => null);
+check('vide : réglages de l\'équipement', sonosbeVoice::titleOptions(''), $none);
 check('« 40 »', sonosbeVoice::titleOptions('40')['volume'], 40);
 check('« 40 % »', sonosbeVoice::titleOptions('40 %')['volume'], 40);
-check('« 35% carillon »', sonosbeVoice::titleOptions('35% carillon'), array('volume' => 35, 'chime' => true, 'urgent' => false));
-check('« Urgent, 80 » (casse, virgule)', sonosbeVoice::titleOptions('Urgent, 80'), array('volume' => 80, 'chime' => null, 'urgent' => true));
+check('« 35% carillon »', sonosbeVoice::titleOptions('35% carillon'), array_merge($none, array('volume' => 35, 'chime' => true)));
+check('« Urgent, 80 » (casse, virgule)', sonosbeVoice::titleOptions('Urgent, 80'), array_merge($none, array('volume' => 80, 'urgent' => true)));
+check('« 40 voix=onyx ton=enjoué »', sonosbeVoice::titleOptions('40 voix=onyx ton=enjoué'), array_merge($none, array('volume' => 40, 'voice' => 'onyx', 'tone' => 'enjoué')));
+check('« voix:Pierre » (deux-points, casse)', sonosbeVoice::titleOptions('voix:Pierre')['voice'], 'pierre');
 check('« sans-carillon »', sonosbeVoice::titleOptions('sans-carillon')['chime'], false);
 check('volume borné à 100', sonosbeVoice::titleOptions('250')['volume'], 100);
-check('mot inconnu ignoré', sonosbeVoice::titleOptions('bonjour'), array('volume' => null, 'chime' => null, 'urgent' => false));
+check('mot inconnu ignoré', sonosbeVoice::titleOptions('bonjour'), $none);
+
+section('Voix et ton');
+check('onyx : OpenAI', sonosbeVoice::resolveVoice('onyx'), array('engine' => 'openai', 'voice' => 'onyx'));
+check('pierre : Piper, locuteur UPMC', sonosbeVoice::resolveVoice('pierre'), array('engine' => 'piper', 'voice' => 'upmc:pierre'));
+check('Tom (casse) : Piper', sonosbeVoice::resolveVoice('Tom'), array('engine' => 'piper', 'voice' => 'tom'));
+check('voix inconnue', sonosbeVoice::resolveVoice('robert'), null);
+check('ton enjoué (avec accent)', sonosbeVoice::toneInstruction('enjoué'), sonosbeVoice::TONES['enjoue']);
+check('ton enjoue (sans accent)', sonosbeVoice::toneInstruction('enjoue'), sonosbeVoice::TONES['enjoue']);
+check('ton libre', sonosbeVoice::toneInstruction('malicieux'), 'Parle d\'un ton malicieux.');
+check('pas de ton', sonosbeVoice::toneInstruction(''), '');
+config::save('openai_instructions', 'Parle en français.', 'sonosbe');
+check('consigne : configuration puis ton', sonosbeVoice::openaiInstructions('calme'), 'Parle en français. ' . sonosbeVoice::TONES['calme']);
+config::save('openai_instructions', '', 'sonosbe');
+
+section('Usage OpenAI');
+check('tts-1 : 1 000 caractères', round(sonosbeVoice::estimateCost('tts-1', 1000, 60), 4), 0.015);
+check('tts-1-hd : 1 000 caractères', round(sonosbeVoice::estimateCost('tts-1-hd', 1000, 60), 4), 0.03);
+check('gpt-4o-mini-tts : 2 minutes de voix', round(sonosbeVoice::estimateCost('gpt-4o-mini-tts', 1000, 120), 4), 0.03);
+check('aucun usage enregistré', sonosbeVoice::openaiUsage('2026-09')['current']['chars'], 0);
+/* Comme le coeur : config::byKey rend un tableau pour une valeur JSON. */
+config::save('openai_usage', array('month' => '2026-09', 'chars' => 500, 'requests' => 3, 'seconds' => 30.0, 'cost' => 0.01), 'sonosbe');
+check('même mois : cumul lu', sonosbeVoice::openaiUsage('2026-09')['current']['chars'], 500);
+$next = sonosbeVoice::openaiUsage('2026-10');
+check('mois suivant : compteur à zéro', $next['current']['chars'], 0);
+check('mois suivant : le précédent est gardé', $next['previous']['chars'], 500);
+config::save('openai_usage', json_encode(array('month' => '2026-09', 'chars' => 42)), 'sonosbe');
+check('valeur restée en texte JSON : relue aussi', sonosbeVoice::openaiUsage('2026-09')['current']['chars'], 42);
 
 section('Plage de nuit');
 check('23:30 dans 22:00–07:00', sonosbeVoice::inTimeRange('23:30', '22:00', '07:00'), true);

@@ -21,9 +21,7 @@ require_once __DIR__ . '/../../../core/php/core.inc.php';
  * aucune interrogation d'enceinte. */
 function sonosbe_update() {
     try {
-        foreach (sonosbe::byType('sonosbe') as $eqLogic) {
-            $eqLogic->createCommands();
-        }
+        sonosbe::upgradeCommands();
     } catch (Throwable $e) {
         log::add('sonosbe', 'error', __('Mise à jour du plugin :', __FILE__) . ' ' . $e->getMessage());
     }

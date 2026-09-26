@@ -99,7 +99,14 @@ require_once __DIR__ . '/../core/class/sonosbe.class.php';
 			<label class="col-md-4 control-label">{{Ton}}</label>
 			<div class="col-md-6">
 				<input type="text" class="configKey form-control" data-l1key="openai_instructions" placeholder="{{Parle en français, d'un ton calme et chaleureux.}}">
-				<span class="help-block" style="margin:4px 0 0 0;">{{Consigne de diction, comprise par gpt-4o-mini-tts seulement.}}</span>
+				<span class="help-block" style="margin:4px 0 0 0;">{{Consigne de diction, comprise par gpt-4o-mini-tts seulement. Une annonce peut ajouter son propre ton dans son titre : ton=enjoué, ton=sérieux, ton=calme, ton=doux, ton=chuchoté, ton=alerte, ton=solennel, ton=dynamique, ou tout autre mot. Et choisir sa voix : voix=onyx (OpenAI) ou voix=pierre (Piper).}}</span>
+			</div>
+		</div>
+		<div class="form-group">
+			<label class="col-md-4 control-label">{{Usage}}</label>
+			<div class="col-md-8">
+				<div id="div_sonosbeOpenaiUsage" class="help-block" style="margin:0;"></div>
+				<span class="help-block" style="margin:4px 0 0 0;">{{Estimation d'après les tarifs publics d'OpenAI ; sa facture fait foi. Les phrases resservies par le cache ne repartent pas chez OpenAI et ne comptent pas.}}</span>
 			</div>
 		</div>
 
@@ -249,6 +256,16 @@ require_once __DIR__ . '/../core/class/sonosbe.class.php';
 			logPre.style.display = ''
 			logPre.textContent = _status.log.join('\n')
 			logPre.scrollTop = logPre.scrollHeight
+		}
+		var usage = document.getElementById('div_sonosbeOpenaiUsage')
+		if (usage && _status.openai) {
+			var describe = function (_u) {
+				return Number(_u.chars).toLocaleString('fr-FR') + ' {{caractères}}, ' + _u.requests + ' {{requête(s)}}, '
+					+ Number(_u.seconds / 60).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' {{min de voix}}, ≈ '
+					+ Number(_u.cost).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' $'
+			}
+			usage.textContent = '{{Ce mois-ci :}} ' + describe(_status.openai.current)
+				+ (_status.openai.previous ? ' — {{mois précédent :}} ' + describe(_status.openai.previous) : '')
 		}
 		installButton.classList.toggle('disabled', _status.running)
 		if (_status.running && poll === null) {
