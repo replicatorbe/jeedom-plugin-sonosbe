@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1 — 26/09/2026
+
+- Recherche des enceintes : elle ne partait pas quand on validait le champ
+  « sous-réseau » vide (la fenêtre de Jeedom le traite comme Annuler). Elle
+  démarre désormais dès le clic, dans un panneau de la page, avec un
+  compteur, puis un bilan de ce qui a été interrogé (sous-réseau, nombre
+  d'adresses, réponses SSDP, durée). Autre sous-réseau et création des
+  enceintes cochées se font dans ce même panneau.
+- Annonces SSDP envoyées trois fois : une enceinte en veille rate parfois
+  la première.
+
 ## 0.2.0 — 26/09/2026
 
 - Carillon avant les annonces : réglage par enceinte, ou mot-clé

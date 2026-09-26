@@ -113,7 +113,7 @@ try {
         unautorizedInDemo();
         $device = sonosbe::probe(init('ip'));
         $device['source'] = 'IP';
-        ajax::success(array('devices' => array($device)));
+        ajax::success(array('devices' => array($device), 'probe' => $device['ip']));
     }
 
     if (init('action') == 'create') {

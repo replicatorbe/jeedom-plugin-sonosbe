@@ -278,8 +278,10 @@ class sonosbe extends eqLogic {
      * stéréo) sont écartées : elles se pilotent par leur enceinte principale.
      */
     public static function discover($_subnet = '') {
+        $started = microtime(true);
         $ips = array();
-        foreach (self::ssdpSearch() as $ip) {
+        $ssdp = self::ssdpSearch();
+        foreach ($ssdp as $ip) {
             $ips[$ip] = 'SSDP';
         }
         $prefixes = array();
@@ -349,7 +351,15 @@ class sonosbe extends eqLogic {
         }
         $found = array_map(array(__CLASS__, 'markKnown'), array_values($found));
         usort($found, function ($a, $b) { return strnatcasecmp($a['room'], $b['room']); });
-        return array('devices' => $found);
+        /* Ce qui a été interrogé : la page le montre, pour qu'une recherche
+         * vide ne laisse pas deviner si elle a seulement eu lieu. */
+        return array(
+            'devices' => $found,
+            'subnets' => array_map(function ($p) { return $p . '.0/24'; }, array_values(array_unique($prefixes))),
+            'scanned' => count($ips),
+            'ssdp'    => count($ssdp),
+            'seconds' => round(microtime(true) - $started, 1),
+        );
     }
 
     /*
@@ -365,13 +375,18 @@ class sonosbe extends eqLogic {
         }
         $request = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\n"
                  . "ST: urn:schemas-upnp-org:device:ZonePlayer:1\r\n\r\n";
-        /* Deux envois : l'UDP ne garantit rien. */
-        @stream_socket_sendto($socket, $request, 0, '239.255.255.250:1900');
-        @stream_socket_sendto($socket, $request, 0, '239.255.255.250:1900');
         stream_set_blocking($socket, false);
         $ips = array();
-        $deadline = microtime(true) + $_seconds;
+        $started = microtime(true);
+        $deadline = $started + $_seconds;
+        /* Trois envois espacés : l'UDP ne garantit rien, et une enceinte en
+         * veille rate parfois le premier. */
+        $sends = array(0.0, 0.4, 0.9);
         while (microtime(true) < $deadline) {
+            if (!empty($sends) && microtime(true) - $started >= $sends[0]) {
+                array_shift($sends);
+                @stream_socket_sendto($socket, $request, 0, '239.255.255.250:1900');
+            }
             $read = array($socket);
             $write = null;
             $except = null;

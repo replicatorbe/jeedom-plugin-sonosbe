@@ -24,11 +24,15 @@ d'attente, appli…), volume, muet, groupe, minuterie, réglages.
 ## Installation
 
 1. Activez le plugin.
-2. Sur sa page, cliquez sur **Rechercher des Sonos**. Le plugin écoute les
-   annonces du réseau (SSDP) et interroge toutes les adresses du sous-réseau
-   de Jeedom ; la première enceinte trouvée donne ensuite la liste complète
-   du foyer. Vous pouvez aussi **ajouter une enceinte par son adresse IP**.
-3. Cochez les enceintes à créer. Les enceintes appairées (arrières, caisson,
+2. Sur sa page, cliquez sur **Rechercher des Sonos**. La recherche démarre
+   aussitôt dans un panneau de la page, avec un compteur : le plugin écoute
+   les annonces du réseau (SSDP) et interroge toutes les adresses du
+   sous-réseau de Jeedom ; la première enceinte trouvée donne ensuite la
+   liste complète du foyer. Comptez 5 à 10 secondes. Le bilan dit ce qui a
+   été interrogé ; si vos enceintes sont sur un autre sous-réseau (VLAN,
+   Wi-Fi invité), saisissez-le dans le panneau. Vous pouvez aussi **ajouter
+   une enceinte par son adresse IP**.
+3. Cochez les enceintes à créer, puis **Créer les enceintes cochées**. Les enceintes appairées (arrières, caisson,
    seconde enceinte d'une paire stéréo) ne sont pas proposées : elles se
    pilotent par leur enceinte principale.
 

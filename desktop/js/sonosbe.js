@@ -28,11 +28,6 @@ function sonosbeEscape(_text) {
   return div.innerHTML
 }
 
-function sonosbeConfirm(_title, _message, _callback) {
-  var options = { title: _title, message: _message, callback: function (_ok) { if (_ok) { _callback() } } }
-  if (typeof jeeDialog !== 'undefined') { jeeDialog.confirm(options) } else { bootbox.confirm(options) }
-}
-
 function sonosbePrompt(_title, _value, _placeholder, _callback) {
   var options = { title: _title, value: _value, placeholder: _placeholder, callback: function (_v) { if (_v !== null) { _callback(_v) } } }
   if (typeof jeeDialog !== 'undefined') { jeeDialog.prompt(options) } else { bootbox.prompt(options) }
@@ -92,79 +87,146 @@ function sonosbeStatus(_text, _level) {
 
 /* ============================================================== DÉCOUVERTE */
 
-function sonosbeDiscover() {
-  var last = ''
-  try { last = window.localStorage.getItem('sonosbe:subnet') || '' } catch (e) { last = '' }
-  sonosbePrompt('{{Sous-réseau à parcourir, en /24. Laisser vide pour celui de Jeedom.}}', last, '192.168.1.0/24', function (_subnet) {
-    var subnet = String(_subnet).trim()
-    try { window.localStorage.setItem('sonosbe:subnet', subnet) } catch (e) { /* mode privé */ }
-    domUtils.showLoading()
-    sonosbeAjax('discover', { subnet: subnet }, function (result) {
-      domUtils.hideLoading()
-      sonosbeShowFound(result.result)
-    }, function (error) {
-      domUtils.hideLoading()
-      sonosbeFail(error, '{{Échec de la recherche}}')
-    })
+/*
+ * La recherche part dès le clic, sur le réseau de Jeedom, et se déroule dans
+ * un panneau de la page : un compteur montre qu'elle tourne, puis un bilan
+ * dit ce qui a été interrogé. Pas de fenêtre de saisie au départ : celle du
+ * coeur rend « null » pour un champ vide comme pour Annuler, et une
+ * recherche lancée champ vide ne partait jamais.
+ */
+window.sonosbeSearching = false
+
+function sonosbeSearchPanel(_level, _html) {
+  var panel = sonosbeEl('div_sonosbeSearch')
+  var status = sonosbeEl('div_sonosbeSearchStatus')
+  if (panel === null || status === null) { return }
+  panel.style.display = ''
+  status.className = 'alert alert-' + _level
+  status.innerHTML = _html
+}
+
+function sonosbeSearch(_subnet) {
+  if (window.sonosbeSearching) { return }
+  var subnet = String(_subnet || '').trim()
+  var where = subnet !== '' ? sonosbeEscape(subnet) : '{{le réseau de Jeedom}}'
+  var results = sonosbeEl('div_sonosbeSearchResults')
+  if (results !== null) { results.innerHTML = '' }
+  sonosbeEl('bt_sonosbeCreateChecked').style.display = 'none'
+  window.sonosbeSearching = true
+  var started = Date.now()
+  var render = function () {
+    var seconds = Math.floor((Date.now() - started) / 1000)
+    sonosbeSearchPanel('info', '<i class="fas fa-spinner fa-spin"></i> {{Recherche en cours sur}} ' + where + ' — '
+      + seconds + ' s<br><small>{{Annonces SSDP, puis interrogation de chaque adresse sur le port 1400. Comptez 5 à 10 secondes.}}</small>')
+  }
+  render()
+  var timer = setInterval(render, 500)
+  sonosbeAjax('discover', { subnet: subnet }, function (result) {
+    clearInterval(timer)
+    window.sonosbeSearching = false
+    sonosbeShowFound(result.result)
+  }, function (error) {
+    clearInterval(timer)
+    window.sonosbeSearching = false
+    sonosbeSearchPanel('danger', '<i class="fas fa-times-circle"></i> {{La recherche a échoué :}} '
+      + sonosbeEscape((error && error.result) ? error.result : (error && error.statusText) ? error.statusText : '{{erreur inconnue}}'))
   })
+}
+
+function sonosbeDiscover() {
+  sonosbeSearch('')
+}
+
+function sonosbeSearchSubnet() {
+  var subnet = sonosbeEl('in_sonosbeSubnet').value.trim()
+  if (subnet === '') {
+    jeedomUtils.showAlert({ message: '{{Saisissez un sous-réseau, par exemple 192.168.1.0/24.}}', level: 'warning' })
+    return
+  }
+  sonosbeSearch(subnet)
+}
+
+function sonosbeSearchClose() {
+  sonosbeEl('div_sonosbeSearch').style.display = 'none'
 }
 
 function sonosbeAddIp() {
   sonosbePrompt('{{Adresse IP de l\'enceinte}}', '', '192.168.1.50', function (_ip) {
     var ip = String(_ip).trim()
     if (ip === '') { return }
-    sonosbeAjax('probe', { ip: ip }, function (result) { sonosbeShowFound(result.result) })
+    sonosbeEl('div_sonosbeSearchResults').innerHTML = ''
+    sonosbeSearchPanel('info', '<i class="fas fa-spinner fa-spin"></i> {{Interrogation de}} ' + sonosbeEscape(ip) + '…')
+    sonosbeAjax('probe', { ip: ip }, function (result) {
+      sonosbeShowFound(result.result)
+    }, function (error) {
+      sonosbeSearchPanel('warning', '<i class="fas fa-exclamation-triangle"></i> ' + sonosbeEscape((error && error.result) ? error.result : '{{Aucune réponse.}}'))
+    })
   })
 }
 
 function sonosbeShowFound(_result) {
   var devices = (_result && _result.devices) ? _result.devices : []
+  var results = sonosbeEl('div_sonosbeSearchResults')
+  var create = sonosbeEl('bt_sonosbeCreateChecked')
+  window.sonosbeFoundDevices = devices
+  var summary = ''
+  if (_result && _result.probe) {
+    summary = '{{Adresse interrogée :}} ' + sonosbeEscape(_result.probe)
+  } else if (_result) {
+    summary = sonosbeEscape((_result.subnets || []).join(', ')) + ' — ' + sonosbeEscape(_result.scanned) + ' {{adresses interrogées}}, '
+      + sonosbeEscape(_result.ssdp) + ' {{réponse(s) aux annonces SSDP}}, ' + sonosbeEscape(_result.seconds) + ' s'
+  }
   if (devices.length === 0) {
-    jeedomUtils.showAlert({ message: '{{Aucune enceinte Sonos n\'a répondu. Vérifiez qu\'elle est allumée et sur le même réseau, ou saisissez son adresse IP.}}', level: 'warning' })
+    sonosbeSearchPanel('warning', '<i class="fas fa-exclamation-triangle"></i> <b>{{Aucune enceinte Sonos n\'a répondu.}}</b><br>'
+      + '<small>' + summary + '</small><br>'
+      + '{{Vérifiez que les enceintes sont allumées et sur le même réseau que Jeedom. Si elles sont sur un autre sous-réseau (VLAN, Wi-Fi invité), saisissez-le ci-dessous, ou ajoutez une enceinte par son adresse IP.}}')
+    create.style.display = 'none'
     return
   }
-  var html = '<p>{{Cochez les enceintes à créer. Celles qui existent déjà verront seulement leur adresse mise à jour.}}</p>'
-  /* Les choix sont retenus à chaque clic : jeeDialog retire la fenêtre du
-     document avant d'appeler le rappel, les cases n'y sont plus lisibles. */
-  window.sonosbeChosen = {}
+  var fresh = devices.filter(function (d) { return !(d.known && d.known_ip === d.ip) }).length
+  sonosbeSearchPanel('success', '<i class="fas fa-check-circle"></i> <b>' + devices.length + ' {{enceinte(s) trouvée(s)}}</b>'
+    + (fresh === 0 ? ' — {{toutes déjà créées}}' : '') + '<br><small>' + summary + '</small>')
+  var html = ''
   for (var i = 0; i < devices.length; i++) {
     var d = devices[i]
     var already = d.known && d.known_ip === d.ip
-    window.sonosbeChosen[i] = !already
     html += '<div class="checkbox"><label>'
-    html += '<input type="checkbox" class="sonosbeFound" data-index="' + i + '"' + (already ? '' : ' checked') + '> '
+    html += '<input type="checkbox" class="sonosbeFound" data-index="' + i + '"' + (already ? ' disabled' : ' checked') + '> '
     html += '<b>' + sonosbeEscape(d.room || d.display) + '</b> — ' + sonosbeEscape(d.ip)
     html += ' <span class="label label-info">' + sonosbeEscape(d.display || d.model) + '</span>'
-    html += ' <small>S' + sonosbeEscape(d.swgen) + ' · ' + sonosbeEscape(d.version) + ' · ' + sonosbeEscape(d.source) + '</small>'
+    html += ' <small>S' + sonosbeEscape(d.swgen) + ' · ' + sonosbeEscape(d.version) + ' · {{trouvée par}} ' + sonosbeEscape(d.source) + '</small>'
     if (d.known) {
       html += ' <span class="label label-default">{{déjà créée :}} ' + sonosbeEscape(d.known) + '</span>'
-      if (d.known_ip !== d.ip) { html += ' <span class="label label-warning">{{nouvelle adresse}}</span>' }
+      if (d.known_ip !== d.ip) { html += ' <span class="label label-warning">{{nouvelle adresse, sera mise à jour}}</span>' }
     }
     html += '</label></div>'
   }
-  sonosbeConfirm('{{Enceintes trouvées}}', html, function () {
-    var chosen = []
-    for (var index in window.sonosbeChosen) {
-      if (window.sonosbeChosen[index]) { chosen.push({ ip: devices[parseInt(index, 10)].ip }) }
+  results.innerHTML = html
+  create.style.display = fresh > 0 ? '' : 'none'
+}
+
+function sonosbeCreateChecked() {
+  var chosen = []
+  document.querySelectorAll('#div_sonosbeSearchResults .sonosbeFound').forEach(function (_box) {
+    if (_box.checked && !_box.disabled) {
+      chosen.push({ ip: window.sonosbeFoundDevices[parseInt(_box.getAttribute('data-index'), 10)].ip })
     }
-    if (chosen.length === 0) {
-      jeedomUtils.showAlert({ message: '{{Aucune enceinte cochée : rien n\'a été créé.}}', level: 'warning' })
+  })
+  if (chosen.length === 0) {
+    jeedomUtils.showAlert({ message: '{{Aucune enceinte cochée.}}', level: 'warning' })
+    return
+  }
+  sonosbeSearchPanel('info', '<i class="fas fa-spinner fa-spin"></i> {{Création de}} ' + chosen.length + ' {{enceinte(s) : lecture de leurs possibilités, de vos favoris et de leur état…}}')
+  sonosbeAjax('create', { devices: JSON.stringify(chosen) }, function (result) {
+    var r = result.result
+    if (r.errors && r.errors.length > 0) {
+      var list = r.errors.map(function (_e) { return '<li>' + sonosbeEscape(_e) + '</li>' }).join('')
+      sonosbeAlert('{{Création incomplète}}', '<p>' + r.created + ' {{enceinte(s) créée(s). Échecs :}}</p><ul>' + list + '</ul>', function () { sonosbeReload() })
       return
     }
-    domUtils.showLoading()
-    sonosbeAjax('create', { devices: JSON.stringify(chosen) }, function (result) {
-      domUtils.hideLoading()
-      var r = result.result
-      if (r.errors && r.errors.length > 0) {
-        var list = r.errors.map(function (_e) { return '<li>' + sonosbeEscape(_e) + '</li>' }).join('')
-        sonosbeAlert('{{Création incomplète}}', '<p>' + r.created + ' {{enceinte(s) créée(s). Échecs :}}</p><ul>' + list + '</ul>', function () { sonosbeReload() })
-        return
-      }
-      sonosbeReload()
-    }, function (error) {
-      domUtils.hideLoading()
-      sonosbeFail(error, '{{Échec de la création}}')
-    })
+    sonosbeReload()
+  }, function (error) {
+    sonosbeSearchPanel('danger', '<i class="fas fa-times-circle"></i> {{Échec de la création :}} ' + sonosbeEscape((error && error.result) ? error.result : ''))
   })
 }
 
@@ -360,6 +422,9 @@ window.sonosbeHandlers = {
       bt_sonosbeDiscover: sonosbeDiscover,
       bt_sonosbeAddIp: sonosbeAddIp,
       bt_sonosbeAll: sonosbeAll,
+      bt_sonosbeCreateChecked: sonosbeCreateChecked,
+      bt_sonosbeSearchSubnet: sonosbeSearchSubnet,
+      bt_sonosbeSearchClose: sonosbeSearchClose,
       bt_sonosbeRefresh: sonosbeRefresh,
       bt_sonosbeSay: sonosbeSay,
       bt_sonosbeMic: sonosbeMicClick
@@ -372,17 +437,15 @@ window.sonosbeHandlers = {
       }
     }
   },
-  change: function (_event) {
-    /* Voir sonosbeShowFound : les cases de la découverte ne sont plus dans le
-       document quand le rappel de la fenêtre s'exécute. */
-    if (_event.target && _event.target.classList && _event.target.classList.contains('sonosbeFound') && window.sonosbeChosen) {
-      window.sonosbeChosen[_event.target.getAttribute('data-index')] = _event.target.checked
-    }
-  },
+  change: function () {},
   keydown: function (_event) {
     if (_event.key === 'Enter' && _event.target && _event.target.id === 'in_sonosbeSay') {
       _event.preventDefault()
       sonosbeSay()
+    }
+    if (_event.key === 'Enter' && _event.target && _event.target.id === 'in_sonosbeSubnet') {
+      _event.preventDefault()
+      sonosbeSearchSubnet()
     }
   }
 }

@@ -33,6 +33,21 @@ $eqLogics = eqLogic::byType($plugin->getId());
 			</div>
 		</div>
 
+		<!-- Recherche : remplie par le JS, dans la page plutôt que dans une
+		     fenêtre, pour montrer qu'elle tourne et ce qu'elle a interrogé. -->
+		<div id="div_sonosbeSearch" style="display:none;margin:5px;">
+			<legend><i class="fas fa-search"></i> {{Recherche}}</legend>
+			<div id="div_sonosbeSearchStatus" class="alert alert-info"></div>
+			<div id="div_sonosbeSearchResults"></div>
+			<div class="form-inline" style="margin-top:10px;">
+				<a class="btn btn-success btn-sm" id="bt_sonosbeCreateChecked" style="display:none;"><i class="fas fa-check-circle"></i> {{Créer les enceintes cochées}}</a>
+				<span style="margin-left:15px;">{{Chercher sur un autre sous-réseau :}}</span>
+				<input type="text" class="form-control input-sm" id="in_sonosbeSubnet" placeholder="192.168.1.0/24" style="width:160px;">
+				<a class="btn btn-default btn-sm" id="bt_sonosbeSearchSubnet"><i class="fas fa-search"></i> {{Chercher}}</a>
+				<a class="btn btn-default btn-sm" id="bt_sonosbeSearchClose"><i class="fas fa-times"></i> {{Fermer}}</a>
+			</div>
+		</div>
+
 		<legend><i class="fas fa-volume-up"></i> {{Mes enceintes}}</legend>
 		<?php
 		if (count($eqLogics) === 0) {
