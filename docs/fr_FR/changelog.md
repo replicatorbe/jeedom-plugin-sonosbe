@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — 26/09/2026
+
+- Widget sur mesure : carte média avec pochette et fond flouté, couleur
+  selon la source, lecture, volume, favoris, TV / Nuit / Dialogues, champ
+  « Dire quelque chose… », micro et « Rejouer ». Carte dédiée pour « Toutes
+  les enceintes ». Le mobile garde le widget de Jeedom.
+- Temps réel : un démon écoute les événements des enceintes S2 sur leur API
+  locale et fait relire l'état aussitôt. Réglage « Temps réel » dans la
+  configuration, suivi dans la page Santé.
+
 ## 0.3.0 — 26/09/2026
 
 - Voix et ton par annonce, dans le titre : `voix=onyx`, `voix=pierre`,

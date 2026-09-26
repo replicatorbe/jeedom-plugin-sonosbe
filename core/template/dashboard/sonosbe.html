@@ -1,0 +1,414 @@
+<div class="eqLogic eqLogic-widget #class# #category# sonosbe-widget" data-eqType="#eqType#" data-eqLogic_id="#id#" data-eqLogic_uid="#uid#" data-version="#version#" data-translate-category="#translate_category#" data-category="#category#" data-tags="#tags#" data-sb-ids="#sb_ids#" data-sb-state="#sb_state#" data-sb-favorites="#sb_favorites#" data-sb-meta="#sb_meta#" style="width: #width#;height: #height#;#style#">
+  <div class="widget-name">
+    <span style="color:#background-color#" title="#alert_name#"><i class='#alert_icon#'></i></span>
+    <span class="cmd refresh pull-right cursor" data-cmd_id="#refresh_id#" title="{{Relire l'état}}"><i class="fas fa-sync"></i></span>
+    <span class="reportModeVisible">#name_display# <span class="object_name">#object_name#</span></span>
+    <a href="#eqLink#" class="reportModeHidden">#name_display# <span class="object_name">#object_name#</span></a>
+  </div>
+
+  <div class="sbw-card" data-role="card" data-source="none">
+    <div class="sbw-backdrop" data-role="backdrop"></div>
+    <div class="sbw-shade"></div>
+
+    <div class="sbw-body">
+      <!-- Enceinte : ce qui joue -->
+      <div class="sbw-player">
+        <div class="sbw-top">
+          <div class="sbw-art">
+            <img alt="" data-role="art-img">
+            <i class="fas fa-music" data-role="art-icon"></i>
+          </div>
+          <div class="sbw-meta">
+            <div class="sbw-chip">
+              <span class="sbw-eq" data-role="eq"><i></i><i></i><i></i></span>
+              <span data-role="source"></span>
+            </div>
+            <div class="sbw-title" data-role="title"></div>
+            <div class="sbw-artist" data-role="artist"></div>
+          </div>
+        </div>
+
+        <div class="sbw-controls">
+          <button type="button" class="sbw-btn" data-do="previous" title="{{Précédent}}"><i class="fas fa-step-backward"></i></button>
+          <button type="button" class="sbw-btn sbw-main" data-role="play" title="{{Lecture / pause}}"><i class="fas fa-play" data-role="play-icon"></i></button>
+          <button type="button" class="sbw-btn" data-do="next" title="{{Suivant}}"><i class="fas fa-step-forward"></i></button>
+        </div>
+
+        <div class="sbw-volume">
+          <button type="button" class="sbw-icon" data-role="mute" title="{{Couper / rétablir le son}}"><i class="fas fa-volume-up" data-role="mute-icon"></i></button>
+          <input type="range" min="0" max="100" step="1" data-role="volume" title="{{Volume}}">
+          <span class="sbw-value" data-role="volume-value"></span>
+        </div>
+
+        <div class="sbw-pills" data-role="pills">
+          <button type="button" class="sbw-pill" data-role="tv" title="{{Passer sur la TV}}"><i class="fas fa-tv"></i> {{TV}}</button>
+          <button type="button" class="sbw-pill" data-role="night" title="{{Mode nuit : dynamique réduite, pour ne pas réveiller la maison}}"><i class="fas fa-moon"></i> {{Nuit}}</button>
+          <button type="button" class="sbw-pill" data-role="speech" title="{{Dialogues renforcés}}"><i class="fas fa-comment"></i> {{Dialogues}}</button>
+        </div>
+
+        <select class="sbw-select" data-role="favorites" title="{{Jouer un favori Sonos}}"></select>
+      </div>
+
+      <!-- Toutes les enceintes -->
+      <div class="sbw-all">
+        <div class="sbw-all-head">
+          <div class="sbw-all-icon"><i class="fas fa-broadcast-tower"></i></div>
+          <div>
+            <div class="sbw-title">{{Toutes les enceintes}}</div>
+            <div class="sbw-artist" data-role="players"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Annonce, pour les deux -->
+      <div class="sbw-say">
+        <input type="text" data-role="say" placeholder="{{Dire quelque chose…}}" maxlength="500">
+        <button type="button" class="sbw-icon sbw-send" data-role="send" title="{{Annoncer}}"><i class="fas fa-paper-plane"></i></button>
+        <button type="button" class="sbw-icon sbw-mic" data-role="mic" title="{{Message vocal : un clic pour enregistrer, un second pour envoyer}}"><i class="fas fa-microphone"></i></button>
+        <button type="button" class="sbw-icon" data-role="replay" title="{{Rejouer la dernière annonce}}"><i class="fas fa-redo"></i></button>
+      </div>
+
+      <div class="sbw-foot">
+        <span class="sbw-live" data-role="live"></span>
+        <span data-role="foot"></span>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .sonosbe-widget .sbw-card {
+      position: relative; margin: 2px auto 8px; width: 276px; border-radius: 18px; overflow: hidden; color: #fff;
+      background: #1d1e23; box-shadow: 0 8px 22px rgba(0, 0, 0, .35); text-align: left; user-select: none;
+      font-size: 12px; line-height: 1.35;
+    }
+    .sonosbe-widget .sbw-card button, .sonosbe-widget .sbw-card input, .sonosbe-widget .sbw-card select { font-family: inherit; }
+    .sonosbe-widget .sbw-backdrop {
+      position: absolute; inset: -30px; background-size: cover; background-position: center; filter: blur(26px) saturate(1.3);
+      opacity: 0; transition: opacity .6s;
+    }
+    .sonosbe-widget .sbw-card.has-art .sbw-backdrop { opacity: .7; }
+    .sonosbe-widget .sbw-shade { position: absolute; inset: 0; transition: background .6s; }
+    .sonosbe-widget .sbw-card[data-source="none"] .sbw-shade { background: linear-gradient(160deg, rgba(58, 60, 70, .92), rgba(20, 21, 25, .96)); }
+    .sonosbe-widget .sbw-card[data-source="tv"] .sbw-shade { background: linear-gradient(160deg, rgba(49, 72, 150, .9), rgba(15, 18, 38, .96)); }
+    .sonosbe-widget .sbw-card[data-source="radio"] .sbw-shade { background: linear-gradient(160deg, rgba(168, 84, 36, .88), rgba(32, 18, 12, .95)); }
+    .sonosbe-widget .sbw-card[data-source="music"] .sbw-shade { background: linear-gradient(160deg, rgba(24, 120, 108, .88), rgba(10, 30, 28, .95)); }
+    .sonosbe-widget .sbw-card[data-source="all"] .sbw-shade { background: linear-gradient(160deg, rgba(120, 72, 170, .9), rgba(24, 14, 38, .96)); }
+    .sonosbe-widget .sbw-card.has-art .sbw-shade { background: linear-gradient(180deg, rgba(0, 0, 0, .25), rgba(0, 0, 0, .62)); }
+    .sonosbe-widget .sbw-body { position: relative; padding: 14px 14px 10px; }
+
+    .sonosbe-widget .sbw-top { display: flex; gap: 12px; align-items: center; }
+    .sonosbe-widget .sbw-art {
+      position: relative; flex: none; width: 84px; height: 84px; border-radius: 12px; overflow: hidden;
+      background: rgba(255, 255, 255, .1); box-shadow: 0 6px 16px rgba(0, 0, 0, .4);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .sonosbe-widget .sbw-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+    .sonosbe-widget .sbw-art i { font-size: 32px; opacity: .8; }
+    .sonosbe-widget .sbw-card.has-art .sbw-art img { display: block; }
+    .sonosbe-widget .sbw-card.has-art .sbw-art i { display: none; }
+    .sonosbe-widget .sbw-meta { flex: 1; min-width: 0; }
+    .sonosbe-widget .sbw-chip {
+      display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; margin-bottom: 5px;
+      background: rgba(255, 255, 255, .16); font-size: 10px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase;
+    }
+    .sonosbe-widget .sbw-title {
+      font-size: 15px; font-weight: 700; line-height: 1.25; overflow: hidden; display: -webkit-box;
+      -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word;
+    }
+    .sonosbe-widget .sbw-artist { margin-top: 2px; opacity: .78; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* Petit égaliseur animé pendant la lecture. */
+    .sonosbe-widget .sbw-eq { display: none; align-items: flex-end; gap: 2px; height: 10px; }
+    .sonosbe-widget .sbw-eq i { display: block; width: 2px; height: 3px; background: #fff; border-radius: 1px; animation: sbwBar 1s ease-in-out infinite; }
+    .sonosbe-widget .sbw-eq i:nth-child(2) { animation-delay: .2s; }
+    .sonosbe-widget .sbw-eq i:nth-child(3) { animation-delay: .4s; }
+    .sonosbe-widget .sbw-card.playing .sbw-eq { display: inline-flex; }
+    @keyframes sbwBar { 0%, 100% { height: 3px; } 50% { height: 10px; } }
+
+    .sonosbe-widget .sbw-controls { display: flex; justify-content: center; align-items: center; gap: 18px; margin: 14px 0 10px; }
+    .sonosbe-widget .sbw-btn {
+      width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, .12); color: #fff;
+      font-size: 14px; cursor: pointer; transition: background .15s, transform .08s;
+    }
+    .sonosbe-widget .sbw-btn:hover { background: rgba(255, 255, 255, .22); }
+    .sonosbe-widget .sbw-btn:active { transform: scale(.92); }
+    .sonosbe-widget .sbw-main { width: 54px; height: 54px; background: #fff; color: #16171b; font-size: 18px; box-shadow: 0 4px 14px rgba(0, 0, 0, .35); }
+    .sonosbe-widget .sbw-main:hover { background: #f0f0f0; }
+
+    .sonosbe-widget .sbw-volume { display: flex; align-items: center; gap: 8px; }
+    .sonosbe-widget .sbw-volume input { flex: 1; margin: 0; accent-color: #fff; cursor: pointer; }
+    .sonosbe-widget .sbw-value { width: 26px; text-align: right; font-variant-numeric: tabular-nums; opacity: .85; }
+    .sonosbe-widget .sbw-icon {
+      width: 30px; height: 30px; flex: none; border-radius: 50%; border: 0; background: transparent; color: #fff;
+      font-size: 13px; cursor: pointer; opacity: .85; transition: background .15s, opacity .15s;
+    }
+    .sonosbe-widget .sbw-icon:hover { background: rgba(255, 255, 255, .14); opacity: 1; }
+    .sonosbe-widget .sbw-icon.active { color: #ff8a80; opacity: 1; }
+
+    .sonosbe-widget .sbw-pills { display: flex; gap: 6px; margin-top: 10px; }
+    .sonosbe-widget .sbw-pill {
+      flex: 1; border: 0; border-radius: 999px; padding: 5px 0; font-size: 11px; font-weight: 600; cursor: pointer;
+      background: rgba(255, 255, 255, .12); color: #fff; transition: background .15s, color .15s;
+    }
+    .sonosbe-widget .sbw-pill:hover { background: rgba(255, 255, 255, .22); }
+    .sonosbe-widget .sbw-pill.active { background: #fff; color: #16171b; }
+
+    .sonosbe-widget .sbw-select {
+      width: 100%; margin-top: 10px; padding: 5px 10px; border-radius: 999px; border: 0; font-size: 11px; cursor: pointer;
+      background: rgba(255, 255, 255, .12); color: #fff; -webkit-appearance: none; appearance: none;
+    }
+    .sonosbe-widget .sbw-select option { color: #16171b; }
+
+    .sonosbe-widget .sbw-say {
+      display: flex; align-items: center; gap: 2px; margin-top: 12px; padding: 3px 3px 3px 12px; border-radius: 999px;
+      background: rgba(0, 0, 0, .28); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12);
+    }
+    .sonosbe-widget .sbw-say input {
+      flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #fff; font-size: 12px; padding: 5px 0;
+    }
+    .sonosbe-widget .sbw-say input::placeholder { color: rgba(255, 255, 255, .55); }
+    .sonosbe-widget .sbw-send.sent { color: #9be7a0; opacity: 1; }
+    .sonosbe-widget .sbw-mic.sonosbeMicRecording { background: #e5484d !important; opacity: 1; }
+
+    .sonosbe-widget .sbw-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 10px; opacity: .7; }
+    .sonosbe-widget .sbw-foot span:last-child { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sonosbe-widget .sbw-live::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 4px; border-radius: 50%; background: #9aa0a6; vertical-align: 1px; }
+    .sonosbe-widget .sbw-live.on::before { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
+
+    .sonosbe-widget .sbw-all { display: none; }
+    .sonosbe-widget .sbw-card.is-all .sbw-all { display: block; }
+    .sonosbe-widget .sbw-card.is-all .sbw-player { display: none; }
+    .sonosbe-widget .sbw-all-head { display: flex; align-items: center; gap: 12px; }
+    .sonosbe-widget .sbw-all-icon {
+      width: 56px; height: 56px; flex: none; border-radius: 14px; display: flex; align-items: center; justify-content: center;
+      background: rgba(255, 255, 255, .14); font-size: 22px;
+    }
+    .sonosbe-widget .sbw-card.offline .sbw-player { opacity: .45; filter: grayscale(.6); }
+    .sonosbe-widget .sbw-card.busy .sbw-send i { animation: sbwSpin 1s linear infinite; }
+    @keyframes sbwSpin { to { transform: rotate(360deg); } }
+  </style>
+
+  <script>
+    (function () {
+      const widget = document.querySelector('.eqLogic[data-eqLogic_uid="#uid#"]')
+      if (widget === null) { return }
+      /* Identifiants, valeurs et favoris passent par des attributs data :
+         échappés côté serveur, ils ne peuvent rien injecter ici. */
+      const ids = JSON.parse(widget.getAttribute('data-sb-ids') || '{}')
+      const state = JSON.parse(widget.getAttribute('data-sb-state') || '{}')
+      const favorites = JSON.parse(widget.getAttribute('data-sb-favorites') || '[]')
+      const meta = JSON.parse(widget.getAttribute('data-sb-meta') || '{}')
+      const card = widget.querySelector('.sbw-card')
+      const $ = function (_role) { return widget.querySelector('[data-role="' + _role + '"]') }
+      const AJAX = 'plugins/sonosbe/core/ajax/sonosbe.ajax.php'
+
+      function val(_key) {
+        return (state[_key] === undefined || state[_key] === null) ? '' : String(state[_key])
+      }
+
+      let lastAlert = 0
+      function alertOnce(_message, _level) {
+        if (Date.now() - lastAlert < 3000) { return }
+        lastAlert = Date.now()
+        jeedomUtils.showAlert({ message: _message, level: _level || 'danger' })
+      }
+
+      function exec(_logicalId, _value) {
+        if (!ids[_logicalId]) { return }
+        jeedom.cmd.execute({
+          id: ids[_logicalId], value: _value || {},
+          error: function (_error) { alertOnce((_error && _error.message) ? _error.message : '{{L\'enceinte ne répond pas}}') }
+        })
+      }
+
+      /* Source affichée => famille, pour le fond et l'icône. */
+      function family(_source) {
+        const s = _source.toLowerCase()
+        if (s === 'tv') { return 'tv' }
+        if (s === 'radio') { return 'radio' }
+        if (s === '' || s === 'aucune') { return 'none' }
+        return 'music'
+      }
+      const ICONS = { tv: 'fa-tv', radio: 'fa-broadcast-tower', music: 'fa-music', none: 'fa-volume-off' }
+
+      /* Pochette relayée par Jeedom : l'enceinte ne la sert qu'en HTTP, sur
+         le réseau local. v change avec l'adresse de l'image. */
+      let artShown = null
+      function renderArt() {
+        const url = val('cover')
+        if (url === artShown) { return }
+        artShown = url
+        const img = $('art-img')
+        if (url === '') {
+          card.classList.remove('has-art')
+          $('backdrop').style.backgroundImage = ''
+          img.removeAttribute('src')
+          return
+        }
+        let hash = 0
+        for (let i = 0; i < url.length; i++) { hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0 }
+        const proxied = AJAX + '?action=cover&id=' + encodeURIComponent(meta.id) + '&v=' + (hash >>> 0).toString(16)
+        img.onload = function () {
+          card.classList.add('has-art')
+          $('backdrop').style.backgroundImage = 'url("' + proxied + '")'
+        }
+        img.onerror = function () { card.classList.remove('has-art') }
+        img.src = proxied
+      }
+
+      let dragging = false
+      function render() {
+        if (meta.all) {
+          card.classList.add('is-all')
+          card.setAttribute('data-source', 'all')
+          $('players').textContent = meta.players.length > 0 ? meta.players.join(' · ') : '{{Aucune enceinte active}}'
+          const cost = val('openai_cost')
+          $('foot').textContent = val('announce_last') !== '' ? '{{Dernière :}} ' + val('announce_last') : ''
+          $('live').textContent = cost !== '' && Number(cost) > 0 ? 'OpenAI ≈ ' + Number(cost).toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' $' : ''
+          $('live').classList.remove('on')
+          return
+        }
+        const online = val('online') !== '0'
+        const playing = val('playing') === '1'
+        const fam = family(val('source'))
+        card.setAttribute('data-source', fam)
+        card.classList.toggle('offline', !online)
+        card.classList.toggle('playing', online && playing)
+        $('art-icon').className = 'fas ' + ICONS[fam]
+        /* « File d'attente » est le mot de Sonos ; pour l'utilisateur, c'est
+           de la musique. En pause, on le dit. */
+        let source = val('source') === '{{File d\'attente}}' ? '{{Musique}}' : val('source')
+        if (online && !playing && fam !== 'none' && val('state') !== '') { source += ' · ' + val('state') }
+        $('source').textContent = !online ? '{{Hors ligne}}' : (source || '{{Aucune source}}')
+        let title = val('title')
+        let artist = [val('artist'), val('album')].filter(function (_s) { return _s !== '' }).join(' — ')
+        if (fam === 'radio' && val('station') !== '' && val('station') !== title) {
+          artist = artist !== '' ? artist + ' · ' + val('station') : val('station')
+        }
+        if (fam === 'tv') { title = '{{Télévision}}'; artist = playing ? '{{Son de la TV en cours}}' : '{{TV éteinte ou muette}}' }
+        if (title === '') { title = fam === 'none' ? '{{Rien en lecture}}' : val('state') }
+        $('title').textContent = title
+        $('artist').textContent = artist
+        $('play-icon').className = 'fas ' + (playing ? 'fa-pause' : 'fa-play')
+        const muted = val('mute') === '1'
+        $('mute').classList.toggle('active', muted)
+        $('mute-icon').className = 'fas ' + (muted ? 'fa-volume-mute' : 'fa-volume-up')
+        if (!dragging && val('volume') !== '') {
+          $('volume').value = val('volume')
+          $('volume-value').textContent = val('volume')
+        }
+        $('tv').classList.toggle('active', val('tv_active') === '1')
+        $('night').classList.toggle('active', val('night') === '1')
+        $('speech').classList.toggle('active', val('speech') === '1')
+        const group = val('group')
+        $('foot').textContent = group !== '' && group.indexOf('+') !== -1 ? '{{Groupe :}} ' + group : ''
+        const live = !!meta.live
+        $('live').textContent = live ? '{{En direct}}' : '{{Relevé chaque minute}}'
+        $('live').classList.toggle('on', live)
+        renderArt()
+      }
+
+      /* Commandes */
+      widget.querySelectorAll('[data-do]').forEach(function (_button) {
+        _button.addEventListener('click', function () { exec(_button.getAttribute('data-do')) })
+      })
+      $('play').addEventListener('click', function () { exec(val('playing') === '1' ? 'pause' : 'play') })
+      $('mute').addEventListener('click', function () { exec(val('mute') === '1' ? 'mute_off' : 'mute_on') })
+      const volume = $('volume')
+      volume.addEventListener('pointerdown', function () { dragging = true })
+      volume.addEventListener('input', function () { dragging = true; $('volume-value').textContent = volume.value })
+      volume.addEventListener('change', function () {
+        exec('volume_set', { slider: volume.value })
+        /* Le relevé qui suit ramène la vraie valeur. */
+        setTimeout(function () { dragging = false }, 1500)
+      })
+      $('tv').addEventListener('click', function () { exec('tv') })
+      $('night').addEventListener('click', function () { exec(val('night') === '1' ? 'night_off' : 'night_on') })
+      $('speech').addEventListener('click', function () { exec(val('speech') === '1' ? 'speech_off' : 'speech_on') })
+      if (!meta.ht || !ids.tv) { $('pills').style.display = 'none' }
+
+      const select = $('favorites')
+      select.innerHTML = ''
+      if (favorites.length === 0 || !ids.favorite) {
+        select.style.display = 'none'
+      } else {
+        const first = document.createElement('option')
+        first.value = ''
+        first.textContent = '{{Jouer un favori…}}'
+        select.appendChild(first)
+        favorites.forEach(function (_f) {
+          const option = document.createElement('option')
+          option.value = _f
+          option.textContent = _f
+          select.appendChild(option)
+        })
+        select.addEventListener('change', function () {
+          if (select.value !== '') { exec('favorite', { select: select.value }) }
+          select.value = ''
+        })
+      }
+
+      /* Annonce tapée : passe par l'ajax du plugin, comme une annonce
+         déclenchée à la main (la plage de nuit baisse le volume mais ne la
+         retient pas). */
+      const say = $('say')
+      function send() {
+        const text = say.value.trim()
+        if (text === '' || card.classList.contains('busy')) { return }
+        card.classList.add('busy')
+        const body = new URLSearchParams()
+        body.append('action', 'dashboardSay')
+        body.append('id', meta.id)
+        body.append('text', text)
+        fetch(AJAX, { method: 'POST', body: body, credentials: 'same-origin' }).then(function (_r) { return _r.json() }).then(function (_r) {
+          card.classList.remove('busy')
+          if (_r.state !== 'ok') { throw new Error(_r.result) }
+          say.value = ''
+          $('send').classList.add('sent')
+          setTimeout(function () { $('send').classList.remove('sent') }, 1500)
+          if (_r.result && _r.result.method === 'blocked') { alertOnce('{{Annonce retenue par la plage de nuit.}}', 'warning') }
+        }).catch(function (_error) {
+          card.classList.remove('busy')
+          alertOnce('{{Annonce impossible :}} ' + (_error && _error.message ? _error.message : _error))
+        })
+      }
+      $('send').addEventListener('click', send)
+      say.addEventListener('keydown', function (_event) {
+        if (_event.key === 'Enter') { _event.preventDefault(); send() }
+      })
+
+      /* Micro : module commun, chargé une fois. */
+      if (!window.sonosbeMic && !document.getElementById('sonosbeMicScript')) {
+        const script = document.createElement('script')
+        script.id = 'sonosbeMicScript'
+        script.src = 'plugins/sonosbe/desktop/js/sonosbeMic.js'
+        document.head.appendChild(script)
+      }
+      if (!ids.micro) { $('mic').style.display = 'none' }
+      $('mic').addEventListener('click', function () {
+        if (window.sonosbeMic) { window.sonosbeMic.toggle(this, { cmd_id: ids.micro }) }
+      })
+      if (!ids.replay) { $('replay').style.display = 'none' }
+      $('replay').addEventListener('click', function () { exec('replay') })
+
+      if (ids.refresh) {
+        widget.querySelector('.refresh').addEventListener('click', function () { exec('refresh') })
+      } else {
+        widget.querySelector('.refresh').remove()
+      }
+
+      /* Mise à jour en direct. L'uid rend chaque fonction distincte : le
+         coeur ignore une fonction dont le texte est déjà enregistré, et un
+         widget redessiné ne recevrait plus rien. */
+      Object.keys(state).forEach(function (_key) {
+        if (!ids[_key]) { return }
+        jeedom.cmd.addUpdateFunction(ids[_key], function (_options) {
+          if (document.querySelector('.eqLogic[data-eqLogic_uid="#uid#"]') === null) { return }
+          state[_key] = (_options.value === null || _options.value === undefined) ? '' : String(_options.value)
+          render()
+        })
+      })
+      render()
+    })()
+  </script>
+</div>

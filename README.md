@@ -20,6 +20,9 @@ depuis le dashboard.
 | `core/php/sonosbeProbe.php` | Témoin du test d'accès des enceintes |
 | `desktop/js/sonosbeMic.js` | Enregistrement au micro, partagé par le widget et la page |
 | `resources/install-piper.sh` | Téléchargement de Piper et d'une voix |
+| `resources/sonosbed/sonosbed.php` | Démon temps réel : écoute les événements des S2, fait relire l'état |
+| `core/php/jeeSonosbe.php` | Point d'entrée du démon |
+| `core/template/dashboard/sonosbe.html` | Widget du dashboard (carte média) |
 
 ## Tests
 

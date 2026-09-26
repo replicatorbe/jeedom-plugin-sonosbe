@@ -17,6 +17,11 @@
 
 require_once __DIR__ . '/../../../core/php/core.inc.php';
 
+function sonosbe_install() {
+    /* Le point d'entrée du démon ne parle qu'à un processus local. */
+    config::save('api::sonosbe::mode', 'localhost', 'core');
+}
+
 /* Exécutée dans la requête HTTP de la page des plugins : rien de lent ici,
  * aucune interrogation d'enceinte. */
 function sonosbe_update() {

@@ -17,9 +17,36 @@ synthèse, et messages vocaux enregistrés au micro depuis le dashboard.
 | Barres de son | Passer sur la TV, Mode nuit, Dialogues renforcés, info **TV en cours** |
 | Voix | **Annonce** (texte), **Message vocal** (micro), Rejouer la dernière annonce, Préparer une annonce |
 
-Informations relevées chaque minute, et juste après chaque ordre : statut,
+Informations relevées en temps réel sur les Sonos S2 (voir plus bas), sinon
+chaque minute et juste après chaque ordre : statut,
 titre, artiste, album, station de radio, pochette, source (TV, radio, file
 d'attente, appli…), volume, muet, groupe, minuterie, réglages.
+
+## Le widget
+
+Sur le dashboard, chaque enceinte s'affiche en carte média : pochette (et
+son fond flouté), titre, artiste, source, boutons de lecture, volume,
+favoris, et pour une barre de son les boutons TV, Nuit et Dialogues. En bas,
+un champ **Dire quelque chose…** annonce ce qu'on y tape (Entrée pour
+envoyer), à côté du micro et de « Rejouer ». La couleur de la carte suit la
+source : bleu pour la TV, orange pour la radio, vert pour la musique.
+
+« Toutes les enceintes » a sa propre carte, réduite aux annonces. Pour
+revenir au widget générique de Jeedom : configuration avancée de
+l'équipement, décocher **Widget du plugin**.
+
+## Temps réel
+
+Le démon du plugin reste connecté à chaque enceinte S2 par son API locale,
+et s'abonne à ses événements : lecture, morceau, volume, groupes. À chaque
+changement, l'état est relu aussitôt : le widget suit à la seconde, et
+**TV en cours** peut déclencher un scénario dès que la TV démarre. Les
+connexions partent de Jeedom vers les enceintes : aucun port à ouvrir.
+
+Le démon se lance seul (page du plugin, bloc Démon). Le réglage **Temps
+réel** de la configuration le coupe. Enceintes S1, ou démon arrêté : l'état
+est relu chaque minute, comme avant. La page Santé indique combien
+d'enceintes sont suivies en direct.
 
 ## Installation
 

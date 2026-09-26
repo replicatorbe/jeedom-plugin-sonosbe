@@ -89,6 +89,19 @@ try {
             'label' => __('Message vocal', __FILE__), 'manual' => true)));
     }
 
+    /* Annonce tapée dans le widget du dashboard : déclenchée à la main, la
+     * plage de nuit baisse son volume mais ne la retient pas. */
+    if (init('action') == 'dashboardSay') {
+        $eqLogic = eqLogic::byId(init('id'));
+        if (!is_object($eqLogic) || $eqLogic->getEqType_name() != 'sonosbe') {
+            throw new Exception(__('Équipement introuvable.', __FILE__));
+        }
+        if (!$eqLogic->hasRight('x')) {
+            throw new Exception(__('Vous n\'avez pas le droit d\'utiliser cette enceinte.', __FILE__));
+        }
+        ajax::success($eqLogic->announce(init('text'), '', true));
+    }
+
     /* ------------------------------------------------------------------
      * Le reste : page du plugin, administrateurs seulement.
      * ------------------------------------------------------------------ */

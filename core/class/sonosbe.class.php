@@ -95,6 +95,12 @@ class sonosbe extends eqLogic {
             if (!$slowTurn && (int) $eqLogic->getCache('failures', 0) >= self::OFFLINE_AFTER) {
                 continue;
             }
+            /* Suivie en direct par le démon : relue sur événement, et une
+             * minute sur cinq par sécurité (sleep, réglages de la barre, que
+             * l'API locale ne signale pas). */
+            if (!$slowTurn && $eqLogic->isLive()) {
+                continue;
+            }
             try {
                 $eqLogic->poll();
             } catch (Throwable $e) {
@@ -175,6 +181,169 @@ class sonosbe extends eqLogic {
         }
     }
 
+    /* ================================================================ DÉMON */
+
+    /*
+     * Le démon (resources/sonosbed) écoute les événements des enceintes S2
+     * sur leur API locale et rappelle jeeSonosbe.php quand l'une change :
+     * l'état est alors relu par poll(), le même chemin que le cron. Il ne
+     * charge pas le coeur et ne pilote rien. Démon arrêté, ou enceinte S1 :
+     * le relevé de la minute continue seul.
+     */
+    public static function deamon_info() {
+        $return = array('log' => __CLASS__ . 'd', 'state' => 'nok', 'launchable' => 'ok');
+        if (config::byKey('live', __CLASS__, 1) != 1) {
+            $return['launchable'] = 'nok';
+            $return['launchable_message'] = __('Temps réel désactivé dans la configuration du plugin', __FILE__);
+        }
+        $pid_file = jeedom::getTmpFolder(__CLASS__) . '/deamon.pid';
+        if (file_exists($pid_file)) {
+            $pid = trim(file_get_contents($pid_file));
+            if ($pid != '' && @posix_getsid((int) $pid)) {
+                $return['state'] = 'ok';
+            } else {
+                @unlink($pid_file);
+            }
+        }
+        /* Un démon vivant qui ne joint plus Jeedom ne sert à rien : déclaré
+         * arrêté, pour que la gestion automatique le relance. Il rappelle au
+         * moins chaque minute. */
+        if ($return['state'] == 'ok' && time() - (int) @filemtime($pid_file) > 120
+            && time() - (int) cache::byKey('sonosbe::daemon_seen')->getValue(0) > 150) {
+            $return['state'] = 'nok';
+        }
+        return $return;
+    }
+
+    public static function deamon_start() {
+        self::deamon_stop();
+        if (config::byKey('live', __CLASS__, 1) != 1) {
+            return false;
+        }
+        /* Le point d'entrée du démon ne répond qu'aux appels locaux. */
+        if (config::byKey('api::sonosbe::mode', 'core', '') === '') {
+            config::save('api::sonosbe::mode', 'localhost', 'core');
+        }
+        $daemon = realpath(__DIR__ . '/../../resources/sonosbed/sonosbed.php');
+        $cmd  = 'php ' . escapeshellarg($daemon);
+        $cmd .= ' --callback ' . escapeshellarg(self::getCallbackUrl());
+        $cmd .= ' --pid ' . escapeshellarg(jeedom::getTmpFolder(__CLASS__) . '/deamon.pid');
+        $cmd .= ' --stamp ' . escapeshellarg(self::stampFile());
+        $cmd .= ' --loglevel ' . escapeshellarg(log::convertLogLevel(log::getLogLevel(__CLASS__)));
+        $cmd .= ' --timezone ' . escapeshellarg(date_default_timezone_get());
+        /* La clé API passe par un fichier lisible du seul www-data, que le
+         * démon efface après l'avoir lu : jamais en argument, que ps montre
+         * à tous. */
+        $keyFile = jeedom::getTmpFolder(__CLASS__) . '/daemon.key';
+        @unlink($keyFile);
+        $old = umask(0077);
+        file_put_contents($keyFile, jeedom::getApiKey(__CLASS__));
+        umask($old);
+        $cmd .= ' --keyfile ' . escapeshellarg($keyFile);
+        log::add(__CLASS__, 'info', __('Lancement du démon', __FILE__));
+        exec($cmd . ' >> ' . log::getPathToLog(__CLASS__ . 'd') . ' 2>&1 &');
+        for ($i = 1; $i <= 20; $i++) {
+            if (self::deamon_info()['state'] == 'ok') {
+                message::removeAll(__CLASS__, 'unableStartDeamon');
+                return true;
+            }
+            sleep(1);
+        }
+        log::add(__CLASS__, 'error', __('Le démon n\'a pas démarré. Consultez le journal', __FILE__) . ' ' . __CLASS__ . 'd.');
+        return false;
+    }
+
+    public static function deamon_stop() {
+        $pid_file = jeedom::getTmpFolder(__CLASS__) . '/deamon.pid';
+        if (file_exists($pid_file)) {
+            $pid = trim(file_get_contents($pid_file));
+            if ($pid != '') {
+                system::kill($pid);
+            }
+            @unlink($pid_file);
+        }
+        system::kill('resources/sonosbed/sonosbed.php');
+        return true;
+    }
+
+    public static function getCallbackUrl() {
+        return network::getNetworkAccess('internal', 'http:127.0.0.1:port:comp') . '/plugins/sonosbe/core/php/jeeSonosbe.php';
+    }
+
+    public static function stampFile() {
+        return jeedom::getTmpFolder(__CLASS__) . '/players.stamp';
+    }
+
+    /* Le démon relit la liste des enceintes quand ce fichier change. */
+    public static function notifyDaemon() {
+        @file_put_contents(self::stampFile(), sprintf('%.6f', microtime(true)));
+    }
+
+    /* Réglage « Temps réel » changé : démon lancé ou arrêté aussitôt. */
+    public static function postConfig_live($_value) {
+        if ($_value == 1) {
+            self::deamon_start();
+        } else {
+            self::deamon_stop();
+        }
+    }
+
+    /* Enceintes que le démon écoute : les S2 actives, qui ont l'API locale. */
+    public static function daemonPlayers() {
+        $players = array();
+        foreach (self::configured() as $eqLogic) {
+            if (!$eqLogic->hasAudioClip() || $eqLogic->uid() === '') {
+                continue;
+            }
+            $players[] = array('eq' => (int) $eqLogic->getId(), 'ip' => $eqLogic->ip(), 'uid' => $eqLogic->uid(),
+                               'household' => (string) $eqLogic->getConfiguration('household', ''), 'name' => $eqLogic->getHumanName());
+        }
+        return $players;
+    }
+
+    /*
+     * Événements transmis par le démon : [eq => array(topology)]. Un
+     * changement de groupe relit d'abord la topologie, puis toutes les
+     * enceintes, puisque ce qui joue dépend du coordinateur.
+     */
+    public static function daemonChanged($_changed) {
+        $topology = false;
+        $eqLogics = array();
+        foreach ($_changed as $id => $flags) {
+            $eqLogic = self::byId((int) $id);
+            if (!is_object($eqLogic) || $eqLogic->getEqType_name() != __CLASS__ || !$eqLogic->getIsEnable()) {
+                continue;
+            }
+            $eqLogics[$eqLogic->getId()] = $eqLogic;
+            $topology = $topology || (is_array($flags) && !empty($flags['topology']));
+        }
+        if ($topology) {
+            try {
+                self::refreshTopology(self::configured());
+            } catch (Throwable $e) {
+                log::add(__CLASS__, 'debug', __('Topologie :', __FILE__) . ' ' . $e->getMessage());
+            }
+            foreach (self::configured() as $eqLogic) {
+                $eqLogics[$eqLogic->getId()] = $eqLogic;
+            }
+        }
+        foreach ($eqLogics as $eqLogic) {
+            try {
+                $eqLogic->poll();
+            } catch (Throwable $e) {
+                log::add(__CLASS__, 'debug', $eqLogic->getHumanName() . ' : ' . $e->getMessage());
+            }
+        }
+    }
+
+    /* Le démon dit à chaque relecture quelles enceintes il écoute ; la
+     * valeur vieillit avec lui. */
+    public function isLive() {
+        $live = cache::byKey('sonosbe::live')->getValue(array());
+        return is_array($live) && isset($live['at'], $live['eqs']) && time() - (int) $live['at'] < 150
+            && in_array((int) $this->getId(), (array) $live['eqs'], true);
+    }
+
     public static function upgradeCommands() {
         foreach (self::byType(__CLASS__) as $eqLogic) {
             try {
@@ -203,6 +372,17 @@ class sonosbe extends eqLogic {
             'advice' => __('Estimation d\'après les tarifs publics d\'OpenAI ; les phrases resservies par le cache ne sont pas comptées.', __FILE__),
             'state'  => true,
         )) : array();
+        $live = array();
+        if (config::byKey('live', __CLASS__, 1) == 1) {
+            $s2 = array_filter($eqLogics, function ($eq) { return $eq->hasAudioClip(); });
+            $connected = array_filter($s2, function ($eq) { return $eq->isLive(); });
+            $live[] = array(
+                'test'   => __('Temps réel', __FILE__),
+                'result' => count($connected) . '/' . count($s2) . ' ' . __('enceinte(s) S2 suivies en direct', __FILE__),
+                'advice' => count($connected) === count($s2) ? '' : __('Une enceinte hors suivi direct est relue chaque minute. Vérifiez que le démon tourne.', __FILE__),
+                'state'  => count($connected) === count($s2) - count(array_intersect_key($s2, $offline)),
+            );
+        }
         return array_merge(array(
             array(
                 'test'   => __('Enceintes joignables', __FILE__),
@@ -216,7 +396,7 @@ class sonosbe extends eqLogic {
                 'advice' => $problem === '' ? '' : __('Voir la configuration du plugin.', __FILE__),
                 'state'  => $problem === '',
             ),
-        ), $openai);
+        ), $live, $openai);
     }
 
     /* Jeedom peut se servir du plugin comme moteur de synthèse vocale pour
@@ -251,10 +431,17 @@ class sonosbe extends eqLogic {
 
     public function postSave() {
         $this->createCommands();
+        /* Adresse, activation, enceinte ajoutée : le démon ajuste ses
+         * connexions sans attendre sa relecture de la minute. */
+        self::notifyDaemon();
         if ($this->getCache('ip_seen', '') !== $this->getConfiguration('ip')) {
             $this->setCache('ip_seen', $this->getConfiguration('ip'));
             $this->setCache('failures', 0);
         }
+    }
+
+    public function postRemove() {
+        self::notifyDaemon();
     }
 
     public function isConfigured() {
@@ -1797,6 +1984,72 @@ class sonosbe extends eqLogic {
         return $cmd;
     }
 
+    /* ============================================================== WIDGET */
+
+    /* Commandes que le widget lit ou actionne. */
+    const WIDGET_INFOS = array('state', 'playing', 'volume', 'mute', 'cover', 'title', 'artist', 'album', 'station', 'source',
+                               'group', 'online', 'tv_active', 'night', 'speech', 'announce_last', 'openai_cost');
+    const WIDGET_ACTIONS = array('previous', 'play', 'pause', 'next', 'volume_set', 'mute_on', 'mute_off', 'tv', 'night_on',
+                                 'night_off', 'speech_on', 'speech_off', 'favorite', 'micro', 'replay', 'refresh');
+
+    /*
+     * Carte média sur mesure pour le dashboard. Le mobile garde le widget
+     * du coeur, et l'option « Widget du plugin » de l'équipement permet de
+     * revenir au widget générique (template_replace s'en charge).
+     */
+    public function toHtml($_version = 'dashboard') {
+        if (jeedom::versionAlias($_version) !== 'dashboard') {
+            return parent::toHtml($_version);
+        }
+        $replace = $this->preToHtml($_version);
+        if (!is_array($replace)) {
+            return $replace;
+        }
+        $version = jeedom::versionAlias($_version);
+        /* Une carte a sa taille à elle : celle retenue par le dashboard pour
+         * le widget générique la couperait. */
+        $replace['#width#'] = '300px';
+        $replace['#height#'] = 'auto';
+        $ids = array();
+        $state = array();
+        foreach (array_merge(self::WIDGET_INFOS, self::WIDGET_ACTIONS) as $logicalId) {
+            $cmd = $this->getCmd(null, $logicalId);
+            if (!is_object($cmd)) {
+                continue;
+            }
+            $ids[$logicalId] = (string) $cmd->getId();
+            if ($cmd->getType() === 'info') {
+                $value = $cmd->execCmd();
+                $state[$logicalId] = ($value === null) ? '' : (string) $value;
+            }
+        }
+        $favorites = array();
+        $favorite = $this->getCmd('action', 'favorite');
+        foreach (explode(';', is_object($favorite) ? (string) $favorite->getConfiguration('listValue', '') : '') as $entry) {
+            $parts = explode('|', $entry, 2);
+            if (trim($parts[0]) !== '') {
+                $favorites[] = trim($parts[0]);
+            }
+        }
+        $meta = array(
+            'id'      => (int) $this->getId(),
+            'all'     => $this->isAll(),
+            'ht'      => $this->isHomeTheater(),
+            'live'    => !$this->isAll() && $this->isLive(),
+            'players' => $this->isAll() ? array_map(function ($eq) { return $eq->getName(); }, self::configured()) : array(),
+        );
+        $replace['#refresh_id#'] = isset($ids['refresh']) ? $ids['refresh'] : '';
+        /* En attribut HTML, échappé : le script les relit sans rien évaluer. */
+        $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+        $replace['#sb_ids#'] = htmlspecialchars(json_encode($ids), ENT_QUOTES);
+        $replace['#sb_state#'] = htmlspecialchars(json_encode($state, $flags), ENT_QUOTES);
+        $replace['#sb_favorites#'] = htmlspecialchars(json_encode($favorites, $flags), ENT_QUOTES);
+        $replace['#sb_meta#'] = htmlspecialchars(json_encode($meta, $flags), ENT_QUOTES);
+        $template = getTemplate('core', $version, 'sonosbe', __CLASS__);
+        $html = translate::exec($template, 'plugins/sonosbe/core/template/' . $version . '/sonosbe.html');
+        return $this->postToHtml($_version, template_replace($replace, $html));
+    }
+
     /* ================================================================ PAGE */
 
     public function toAjax() {
@@ -1821,6 +2074,7 @@ class sonosbe extends eqLogic {
             'capabilities' => $caps,
             'favorites'    => count(self::favorites()),
             'history'      => $this->history(),
+            'live'         => $this->isLive(),
             'announceUrl'  => sonosbeVoice::baseUrl(),
         );
     }

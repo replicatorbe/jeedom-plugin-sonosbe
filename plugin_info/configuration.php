@@ -153,6 +153,15 @@ require_once __DIR__ . '/../core/class/sonosbe.class.php';
 
 		<legend><i class="fas fa-network-wired"></i> {{Réseau}}</legend>
 		<div class="form-group">
+			<label class="col-md-4 control-label">{{Temps réel}}</label>
+			<div class="col-md-1">
+				<input type="checkbox" class="configKey" data-l1key="live">
+			</div>
+			<div class="col-md-6">
+				<span class="help-block" style="margin:0;">{{Le démon du plugin reste connecté aux enceintes Sonos S2, qui signalent aussitôt tout changement : morceau, lecture, volume, TV, groupes. Le dashboard et l'info « TV en cours » suivent à la seconde. Décoché, ou pour une enceinte S1, l'état est relu une fois par minute.}}</span>
+			</div>
+		</div>
+		<div class="form-group">
 			<label class="col-md-4 control-label">{{Adresse de Jeedom pour les enceintes}}</label>
 			<div class="col-md-4">
 				<input type="text" class="configKey form-control" data-l1key="sonos_url" placeholder="<?php echo htmlspecialchars(network::getNetworkAccess('internal')); ?>">
