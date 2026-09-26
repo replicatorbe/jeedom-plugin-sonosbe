@@ -220,8 +220,10 @@ class sonosbe extends eqLogic {
         if (config::byKey('live', __CLASS__, 1) != 1) {
             return false;
         }
-        /* Le point d'entrée du démon ne répond qu'aux appels locaux. */
-        if (config::byKey('api::sonosbe::mode', 'core', '') === '') {
+        /* Le point d'entrée du démon ne répond qu'aux appels locaux. Le
+         * coeur crée la clé en mode « activé » partout ; seul le démon, sur
+         * cette machine, s'en sert. Un « désactivé » choisi est respecté. */
+        if (in_array(config::byKey('api::sonosbe::mode', 'core', ''), array('', 'enable'), true)) {
             config::save('api::sonosbe::mode', 'localhost', 'core');
         }
         $daemon = realpath(__DIR__ . '/../../resources/sonosbed/sonosbed.php');
