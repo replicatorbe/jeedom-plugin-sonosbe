@@ -168,6 +168,13 @@ function sonosbeShowFound(_result) {
   })
 }
 
+/* Crée l'équipement « Toutes les enceintes » s'il n'existe pas, et l'ouvre. */
+function sonosbeAll() {
+  sonosbeAjax('createAll', {}, function (result) {
+    sonosbeReload(result.result.id)
+  })
+}
+
 function sonosbeReload(_id) {
   jeedomUtils.loadPage('index.php?v=d&m=sonosbe&p=sonosbe' + (_id ? '&id=' + _id : ''))
 }
@@ -183,6 +190,14 @@ function sonosbeRender(_data) {
     state.textContent = '{{Chargement…}}'
     now.textContent = ''
     sonosbeText('pre_sonosbeRaw', '')
+    return
+  }
+  if (_data.all) {
+    var players = _data.players || []
+    state.className = players.length > 0 ? 'alert alert-success' : 'alert alert-warning'
+    state.textContent = players.length > 0 ? '{{Annonces envoyées à :}} ' + players.join(', ') : '{{Aucune enceinte active.}}'
+    sonosbeText('div_sonosbeAllPlayers', players.length > 0 ? '{{Enceintes actives :}} ' + players.join(', ') : '{{Aucune enceinte active pour le moment.}}')
+    sonosbeText('pre_sonosbeRaw', JSON.stringify(_data, null, 2))
     return
   }
   var caps = sonosbeEl('div_sonosbeCaps')
@@ -238,7 +253,16 @@ function sonosbeSay() {
   button.classList.add('disabled')
   sonosbeAjax('say', { id: id, text: text, volume: volume }, function (result) {
     button.classList.remove('disabled')
-    jeedomUtils.showAlert({ message: result.result.method === 'clip' ? '{{Annonce envoyée, par-dessus le son.}}' : '{{Annonce passée, lecture rétablie.}}', level: 'success' })
+    var messages = {
+      clip: '{{Annonce envoyée, par-dessus le son.}}',
+      interrupt: '{{Annonce passée, lecture rétablie.}}',
+      all: '{{Annonce envoyée à toutes les enceintes.}}',
+      blocked: '{{Annonce retenue par la plage de nuit.}}'
+    }
+    var r = result.result
+    var text = messages[r.method] || '{{Annonce envoyée.}}'
+    if (r.errors && r.errors.length > 0) { text += ' {{Échecs :}} ' + r.errors.join(' ; ') }
+    jeedomUtils.showAlert({ message: sonosbeEscape(text), level: (r.errors && r.errors.length > 0) ? 'warning' : 'success' })
   }, function (error) {
     button.classList.remove('disabled')
     sonosbeFail(error, '{{Annonce impossible}}')
@@ -255,6 +279,9 @@ function printEqLogic(_eqLogic) {
   sonosbeStatus('', '')
   sonosbeRender({ loading: true })
   var conf = (_eqLogic && _eqLogic.configuration) ? _eqLogic.configuration : {}
+  var all = conf.kind === 'all'
+  document.querySelectorAll('.sonosbeAllOnly').forEach(function (_el) { _el.style.display = all ? '' : 'none' })
+  document.querySelectorAll('.sonosbeDeviceOnly').forEach(function (_el) { _el.style.display = all ? 'none' : '' })
   sonosbeText('span_sonosbeRoom', conf.room)
   sonosbeText('span_sonosbeModel', conf.model)
   sonosbeText('span_sonosbeGen', conf.swgen ? 'S' + conf.swgen : '')
@@ -332,6 +359,7 @@ window.sonosbeHandlers = {
     var actions = {
       bt_sonosbeDiscover: sonosbeDiscover,
       bt_sonosbeAddIp: sonosbeAddIp,
+      bt_sonosbeAll: sonosbeAll,
       bt_sonosbeRefresh: sonosbeRefresh,
       bt_sonosbeSay: sonosbeSay,
       bt_sonosbeMic: sonosbeMicClick

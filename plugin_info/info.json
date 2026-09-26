@@ -1,7 +1,7 @@
 {
     "id": "sonosbe",
     "name": "Sonos",
-    "pluginVersion": "0.1.1",
+    "pluginVersion": "0.2.0",
     "description": {
         "fr_FR": "Pilote les enceintes Sonos en réseau local, sans cloud et sans dépendance : lecture, pause, morceau suivant, volume, muet, favoris Sonos, groupes, minuterie de veille, graves, aigus, et pour les barres de son l'entrée TV, le mode nuit et les dialogues renforcés. L'état, le titre, l'artiste et la pochette sont relevés chaque minute. Le plugin fait parler les enceintes : une commande Annonce dit un texte, par-dessus la musique ou la TV, qui reprennent seules ensuite sur les Sonos S2. La voix est fabriquée par Piper, en local et gratuitement, ou par OpenAI. Un bouton micro sur le dashboard envoie un message vocal enregistré depuis le téléphone ou l'ordinateur. Le plugin sert aussi de moteur de synthèse vocale à tout Jeedom.",
         "en_US": "Drives Sonos speakers over the local network, with no cloud and nothing to install: play, pause, next track, volume, mute, Sonos favourites, groups, sleep timer, bass, treble, and for soundbars the TV input, night mode and speech enhancement. State, title, artist and cover art are read every minute. The plugin makes speakers talk: an Announce command speaks a text over the music or the TV, which resume by themselves afterwards on Sonos S2. The voice is produced by Piper, locally and for free, or by OpenAI. A microphone button on the dashboard sends a voice message recorded from a phone or a computer. The plugin also serves as a text-to-speech engine for all of Jeedom."

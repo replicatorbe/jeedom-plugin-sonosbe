@@ -14,8 +14,8 @@ synthèse, et messages vocaux enregistrés au micro depuis le dashboard.
 | Musique | Jouer un favori (vos favoris Sonos), Jouer un son (URL ou fichier) |
 | Groupes | Rejoindre le groupe de…, Quitter le groupe |
 | Réglages | Graves, Aigus, Loudness, Minuterie de veille |
-| Barres de son | Passer sur la TV, Mode nuit, Dialogues renforcés |
-| Voix | **Annonce** (texte), **Message vocal** (micro) |
+| Barres de son | Passer sur la TV, Mode nuit, Dialogues renforcés, info **TV en cours** |
+| Voix | **Annonce** (texte), **Message vocal** (micro), Rejouer la dernière annonce, Préparer une annonce |
 
 Informations relevées chaque minute, et juste après chaque ordre : statut,
 titre, artiste, album, station de radio, pochette, source (TV, radio, file
@@ -61,11 +61,50 @@ Commande **Annonce** de l'enceinte :
 
 - **Message** : le texte à dire. Les tags de scénario y sont remplacés comme
   partout ailleurs (`Il fait #[Extérieur][Météo][Température]# degrés`) ;
-- **Titre** : le volume de ce message (0 à 100). Vide, c'est le volume réglé
-  sur l'équipement.
+- **Titre** : vide, l'annonce prend les réglages de l'équipement. Sinon, un
+  volume et des mots-clés, dans n'importe quel ordre :
+
+| Titre | Effet |
+|---|---|
+| `40` ou `40 %` | volume de cette annonce |
+| `carillon` | un « ding-dong » avant le message |
+| `sans-carillon` | pas de carillon, même s'il est coché sur l'équipement |
+| `urgent` | passe outre la plage de nuit : volume normal, jamais retenue |
+
+Exemple pour une alarme : titre `70 carillon urgent`, message `Fumée détectée
+dans la cuisine`.
 
 Commande **Jouer un son** : même principe, avec dans le message une URL
 `http://…` ou le chemin d'un fichier audio de la machine Jeedom.
+
+**Rejouer la dernière annonce** relit le dernier message, sans refabriquer la
+voix : pratique quand on n'a pas bien entendu, ou pour un message laissé au
+micro.
+
+**Préparer une annonce** fabrique la voix d'un texte sans la jouer. Placée au
+démarrage de Jeedom ou dans un scénario de nuit, elle rend instantanées les
+annonces fixes (« Quelqu'un sonne à la porte »), même sur un Raspberry Pi.
+
+### Le carillon
+
+Coché sur l'équipement, un « ding-dong » précède chaque annonce, pour
+attirer l'attention avant les premiers mots. Il est calculé par le plugin :
+aucun fichier à fournir, et le même son sur toutes les enceintes.
+
+### Toutes les enceintes
+
+Le bouton **Toutes les enceintes** de la page du plugin crée un équipement
+qui envoie ses annonces, sons et messages vocaux à chaque enceinte active.
+La voix n'est fabriquée qu'une fois ; chaque enceinte la joue à son volume,
+avec son carillon. Un titre avec volume s'applique à toutes.
+
+### La plage de nuit
+
+Dans la configuration du plugin : de telle heure à telle heure, les
+annonces passent au **volume de nuit**, qui sert de plafond. En cochant
+**Retenir les annonces des scénarios**, les scénarios se taisent la nuit. Ce
+que quelqu'un déclenche lui-même (micro, bouton du dashboard, « Rejouer »)
+passe toujours, au volume de nuit. Une annonce `urgent` ignore la plage.
 
 ### Par-dessus le son, ou en interrompant
 
@@ -96,7 +135,10 @@ que les Sonos lisent.
 ### Adresse de Jeedom pour les enceintes
 
 L'enceinte vient chercher chaque message sur Jeedom, en HTTP, à l'adresse
-interne configurée dans Jeedom. Si elle ne convient pas (Jeedom en Docker, en
+interne configurée dans Jeedom. Le bouton **Tester l'accès des enceintes**,
+dans la configuration du plugin, fait jouer un court carillon à chaque
+enceinte et vérifie qu'elle est bien venue le chercher : c'est la première
+chose à faire quand une annonce reste muette. Si elle ne convient pas (Jeedom en Docker, en
 HTTPS seulement…), renseignez **Adresse de Jeedom pour les enceintes** dans
 la configuration du plugin, en `http://`. Les fichiers audio portent des noms
 aléatoires ; les messages enregistrés sont effacés au bout d'un jour, le cache
@@ -115,6 +157,10 @@ ou d'OpenAI.
 albums), relus toutes les heures et à chaque clic sur **Rafraîchir**. Dans un
 scénario, le nom du favori suffit, sans respecter la casse.
 
+**TV en cours** vaut 1 quand la barre de son joue le son de la TV : la
+condition utile pour baisser les volets, tamiser la lumière ou ne pas parler
+pendant un film.
+
 **Rejoindre le groupe de** met l'enceinte dans le groupe d'une autre ; les
 ordres de lecture d'une enceinte groupée vont au coordinateur du groupe,
 comme dans l'application Sonos. **Passer sur la TV** fait d'abord quitter son
@@ -125,7 +171,6 @@ groupe à la barre de son.
 - **Page Santé** de Jeedom : enceintes joignables, état du moteur de voix.
 - **Onglet Diagnostic** de l'équipement : le dernier relevé et les possibilités
   de l'enceinte (annonces par-dessus le son ou non, barre de son).
-- **Une annonce n'est pas entendue** : vérifiez depuis un autre appareil que
-  l'adresse indiquée dans la configuration du plugin (bloc Piper, dernière
-  ligne) est joignable en HTTP.
+- **Une annonce n'est pas entendue** : **Tester l'accès des enceintes**, dans
+  la configuration du plugin. Vérifiez aussi la plage de nuit.
 - Journal **sonosbe** en mode Debug pour le détail de chaque échange.

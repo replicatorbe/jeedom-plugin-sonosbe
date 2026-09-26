@@ -747,6 +747,9 @@ class sonosbe extends eqLogic {
             $values['album'] = $now['album'];
             $values['station'] = $now['station'];
             $values['cover'] = $now['art'];
+            /* Le son de la TV passe par la barre : ce qu'un scénario veut
+             * savoir avant de baisser les volets ou de parler. */
+            $values['tv_active'] = ($now['source'] === 'tv' && in_array($state, array('PLAYING', 'TRANSITIONING'), true)) ? 1 : 0;
             $now['state'] = $state;
         }
 
@@ -838,6 +841,31 @@ class sonosbe extends eqLogic {
     /* ============================================================= ACTIONS */
 
     public function runAction($_logicalId, $_options) {
+        $message = isset($_options['message']) ? $_options['message'] : '';
+        $title = isset($_options['title']) ? $_options['title'] : '';
+        /* Commandes de voix : communes aux enceintes et à « Toutes les
+         * enceintes », qui n'a pas d'adresse. */
+        switch ($_logicalId) {
+            case 'announce':
+                $this->announce($message, $title);
+                return;
+            case 'play_url':
+                $this->playAudio($message, $title);
+                return;
+            case 'replay':
+                $this->replayLast();
+                return;
+            case 'prepare':
+                /* La voix est fabriquée et gardée en cache, sans être jouée :
+                 * l'annonce qui suivra partira sans attendre la synthèse. */
+                sonosbeVoice::speak($message);
+                return;
+            case 'micro':
+                throw new Exception(__('« Message vocal » s\'utilise depuis le dashboard : un clic pour enregistrer, un second pour envoyer.', __FILE__));
+        }
+        if ($this->isAll()) {
+            throw new Exception(__('Commande inconnue :', __FILE__) . ' ' . $_logicalId);
+        }
         if (!$this->isConfigured()) {
             throw new Exception(__('Aucune adresse IP n\'est renseignée.', __FILE__));
         }
@@ -927,14 +955,6 @@ class sonosbe extends eqLogic {
                 sonosbeUpnp::call($ip, 'AVTransport', 'BecomeCoordinatorOfStandaloneGroup', array('InstanceID' => 0), self::ACTION_TIMEOUT);
                 $refreshTopology = true;
                 break;
-            case 'announce':
-                $this->announce(isset($_options['message']) ? $_options['message'] : '', isset($_options['title']) ? $_options['title'] : '');
-                return;
-            case 'play_url':
-                $this->playAudio(isset($_options['message']) ? $_options['message'] : '', isset($_options['title']) ? $_options['title'] : '');
-                return;
-            case 'micro':
-                throw new Exception(__('« Message vocal » s\'utilise depuis le dashboard : un clic pour enregistrer, un second pour envoyer.', __FILE__));
             default:
                 throw new Exception(__('Commande inconnue :', __FILE__) . ' ' . $_logicalId);
         }
@@ -1041,30 +1061,98 @@ class sonosbe extends eqLogic {
 
     /* ============================================================ ANNONCES */
 
-    /* Volume d'une annonce : le titre de la commande s'il est renseigné,
-     * sinon le réglage de l'équipement. */
-    public function announceVolume($_title) {
-        /* « 30 », « 30 % » ou « 30% ». */
-        $title = trim(str_replace('%', '', (string) $_title));
-        if ($title !== '' && is_numeric($title)) {
-            return max(0, min(100, (int) $title));
+    /*
+     * Toutes les annonces passent par ici : texte (announce), son (playAudio),
+     * micro, dernière annonce rejouée, et l'équipement « Toutes les
+     * enceintes ». Les options :
+     *
+     *   title   le titre de la commande : volume et mots-clés, voir
+     *           sonosbeVoice::titleOptions() — « 40 carillon urgent » ;
+     *   label   ce que dit l'annonce, pour le journal et « Dernière annonce » ;
+     *   manual  déclenchée par quelqu'un (micro, page, dashboard) : la plage
+     *           de nuit baisse le volume mais ne la bloque pas.
+     *
+     * Rend array(method, url) ; method vaut « blocked » si la plage de nuit
+     * a retenu l'annonce, ce qui n'est pas une erreur pour un scénario.
+     */
+    public function playClip($_clip, $_opts = array()) {
+        $opts = $_opts + array('title' => '', 'label' => '', 'manual' => false, 'remember' => true);
+        if ($this->isAll()) {
+            return $this->playClipEverywhere($_clip, $opts);
         }
+        $title = sonosbeVoice::titleOptions($opts['title']);
+        $volume = $title['volume'] !== null ? $title['volume'] : $this->defaultAnnounceVolume();
+        $chime = $title['chime'] !== null ? $title['chime'] : (int) $this->getConfiguration('announce_chime', 0) === 1;
+
+        if (!$title['urgent'] && sonosbeVoice::nightActive()) {
+            if (!$opts['manual'] && (int) config::byKey('night_block', __CLASS__, 0) === 1) {
+                log::add(__CLASS__, 'info', sprintf(__('%s : annonce retenue, plage de nuit (« %s »)', __FILE__), $this->getHumanName(), $opts['label']));
+                return array('method' => 'blocked', 'url' => '');
+            }
+            $volume = min($volume, sonosbeVoice::nightVolume());
+        }
+
+        $items = array();
+        if ($chime) {
+            $chimeFile = sonosbeVoice::chimeFile();
+            $items[] = array('url' => sonosbeVoice::url($chimeFile), 'duration' => sonosbeVoice::duration($chimeFile),
+                             'margin' => 0.4, 'mime' => 'audio/wav');
+        }
+        if (isset($_clip['file']) && !is_file($_clip['file'])) {
+            throw new Exception(__('Ce message n\'est plus disponible : les fichiers sont effacés au bout d\'un jour.', __FILE__));
+        }
+        $items[] = array('url' => isset($_clip['url']) ? $_clip['url'] : sonosbeVoice::url($_clip['file']),
+                         'duration' => isset($_clip['duration']) ? (float) $_clip['duration'] : 0.0, 'margin' => 1.0,
+                         'mime' => sonosbeVoice::mimeOf(isset($_clip['url']) ? $_clip['url'] : $_clip['file']));
+
+        $method = (string) $this->getConfiguration('announce_method', 'auto');
+        $used = '';
+        if ($method !== 'interrupt' && $this->hasAudioClip()) {
+            try {
+                foreach ($items as $item) {
+                    $this->queuedAudioClip($item['url'], $volume, $item['duration'], $item['margin']);
+                }
+                $used = 'clip';
+            } catch (Throwable $e) {
+                if ($method === 'clip') {
+                    throw $e;
+                }
+                log::add(__CLASS__, 'warning', $this->getHumanName() . ' : ' . __('annonce par l\'API locale impossible, on interrompt la lecture à la place.', __FILE__) . ' ' . $e->getMessage());
+            }
+        }
+        if ($used === '') {
+            if ($method === 'clip' && !$this->hasAudioClip()) {
+                throw new Exception(__('Cette enceinte n\'a pas l\'API locale des Sonos S2 : choisissez un autre mode d\'annonce.', __FILE__));
+            }
+            $this->announceByInterrupting($items, $volume, $opts['label']);
+            $used = 'interrupt';
+        }
+        if ($opts['remember']) {
+            $this->rememberClip($_clip, $opts);
+        }
+        log::add(__CLASS__, 'info', sprintf('%s : %s « %s » (volume %d%s)', $this->getHumanName(),
+            $used === 'clip' ? __('annonce', __FILE__) : __('annonce avec interruption', __FILE__), $opts['label'], $volume,
+            $chime ? ', ' . __('carillon', __FILE__) : ''));
+        return array('method' => $used, 'url' => end($items)['url']);
+    }
+
+    public function defaultAnnounceVolume() {
         $volume = $this->getConfiguration('announce_volume', '');
         return is_numeric($volume) ? max(0, min(100, (int) $volume)) : self::DEFAULT_ANNOUNCE_VOLUME;
     }
 
-    public function announce($_text, $_volume = '') {
+    public function announce($_text, $_title = '', $_manual = false) {
         $text = sonosbeVoice::cleanText($_text);
         if ($text === '') {
             throw new Exception(__('Aucun texte à annoncer.', __FILE__));
         }
         $clip = sonosbeVoice::speak($text);
-        return $this->playClip($clip, $this->announceVolume($_volume), $text);
+        return $this->playClip($clip, array('title' => $_title, 'label' => $text, 'manual' => $_manual));
     }
 
     /* Un son par son URL, ou un fichier de la machine Jeedom, que l'on copie
      * là où l'enceinte peut le lire. */
-    public function playAudio($_source, $_volume = '') {
+    public function playAudio($_source, $_title = '') {
         $source = trim((string) $_source);
         if (preg_match('#^https?://#i', $source)) {
             $clip = array('url' => $source, 'duration' => 0);
@@ -1078,51 +1166,175 @@ class sonosbe extends eqLogic {
             copy($real, $copy);
             $clip = array('file' => $copy, 'duration' => sonosbeVoice::duration($copy));
         }
-        return $this->playClip($clip, $this->announceVolume($_volume), basename($source));
+        return $this->playClip($clip, array('title' => $_title, 'label' => basename($source)));
+    }
+
+    /* La dernière annonce, gardée pour « Rejouer la dernière annonce ». Le
+     * fichier est déjà là : rien n'est refabriqué. */
+    private function rememberClip($_clip, $_opts) {
+        $this->setCache('last_clip', array('clip' => $_clip, 'title' => (string) $_opts['title'], 'label' => (string) $_opts['label']));
+        $this->publishCmd('announce_last', $_opts['label']);
+    }
+
+    public function replayLast() {
+        $last = $this->getCache('last_clip', null);
+        if (!is_array($last) || !isset($last['clip'])) {
+            throw new Exception(__('Aucune annonce à rejouer.', __FILE__));
+        }
+        /* Rejouer, c'est quelqu'un qui n'a pas entendu : pas bloqué la nuit. */
+        return $this->playClip($last['clip'], array('title' => $last['title'], 'label' => $last['label'], 'manual' => true));
+    }
+
+    /* ======================================================= TEST D'ACCÈS */
+
+    const PROBE_WAIT = 8;
+
+    /*
+     * Première cause d'une annonce muette : l'enceinte ne joint pas Jeedom à
+     * l'adresse donnée (Jeedom en Docker, en HTTPS seulement, adresse
+     * interne erronée). Le test le constate au lieu de le supposer : chaque
+     * enceinte reçoit un carillon servi par sonosbeProbe.php, qui note qui
+     * est venu le chercher.
+     */
+    public static function testAccess() {
+        $rows = array();
+        $base = sonosbeVoice::baseUrl();
+        $https = stripos($base, 'https://') === 0;
+        $rows[] = array('test' => __('Adresse donnée aux enceintes', __FILE__), 'ok' => !$https,
+            'detail' => $base . ($https ? ' — ' . __('une enceinte refuse un certificat auto-signé : mettez une adresse en http://', __FILE__) : ''));
+
+        $url = self::probeUrl(self::newProbe());
+        $ch = curl_init($url);
+        curl_setopt_array($ch, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 3, CURLOPT_TIMEOUT => 5,
+                                     CURLOPT_PROXY => '', CURLOPT_SSL_VERIFYPEER => false));
+        $body = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $type = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+        $error = curl_error($ch);
+        curl_close($ch);
+        $selfOk = $body !== false && $code === 200 && strpos($type, 'audio/') === 0;
+        $rows[] = array('test' => __('Jeedom se joint lui-même à cette adresse', __FILE__), 'ok' => $selfOk,
+            'detail' => $selfOk ? __('le fichier de test est servi', __FILE__)
+                : ($error !== '' ? $error : 'HTTP ' . $code . ' ' . $type) . ' — ' . __('vérifiez l\'adresse dans la configuration du plugin', __FILE__));
+
+        $players = self::configured();
+        if (empty($players)) {
+            $rows[] = array('test' => __('Enceintes', __FILE__), 'ok' => false, 'detail' => __('aucune enceinte active', __FILE__));
+            return $rows;
+        }
+        foreach ($players as $player) {
+            $token = self::newProbe();
+            $label = sprintf(__('%s lit un fichier sur Jeedom', __FILE__), $player->getName());
+            try {
+                $played = $player->playClip(array('url' => self::probeUrl($token), 'duration' => 1.9),
+                    array('title' => min($player->defaultAnnounceVolume(), 25) . ' sans-carillon', 'label' => __('Test d\'accès', __FILE__),
+                          'manual' => true, 'remember' => false));
+            } catch (Throwable $e) {
+                $rows[] = array('test' => $label, 'ok' => false, 'detail' => __('l\'enceinte a refusé l\'annonce :', __FILE__) . ' ' . $e->getMessage());
+                continue;
+            }
+            $hits = array();
+            $deadline = microtime(true) + self::PROBE_WAIT;
+            while (microtime(true) < $deadline) {
+                $probe = cache::byKey('sonosbe::probe::' . $token)->getValue(array());
+                $hits = isset($probe['hits']) ? $probe['hits'] : array();
+                if (!empty($hits)) {
+                    break;
+                }
+                usleep(250000);
+            }
+            $rows[] = array('test' => $label, 'ok' => !empty($hits),
+                'detail' => !empty($hits)
+                    ? sprintf(__('fichier lu depuis %s (%s)', __FILE__), $hits[0]['ip'],
+                        $played['method'] === 'clip' ? __('par-dessus le son', __FILE__) : __('avec interruption', __FILE__))
+                    : __('l\'enceinte a accepté l\'annonce mais n\'est pas venue chercher le fichier : elle ne joint pas Jeedom à cette adresse', __FILE__));
+        }
+        return $rows;
+    }
+
+    private static function newProbe() {
+        $token = bin2hex(random_bytes(16));
+        cache::set('sonosbe::probe::' . $token, array('created' => time()), 300);
+        return $token;
+    }
+
+    private static function probeUrl($_token) {
+        return sonosbeVoice::baseUrl() . '/plugins/sonosbe/core/php/sonosbeProbe.php?t=' . $_token;
+    }
+
+    /* ============================================== TOUTES LES ENCEINTES */
+
+    /* L'équipement « Toutes les enceintes » : pas d'adresse, il répartit
+     * ses annonces sur chaque enceinte active. */
+    public function isAll() {
+        return $this->getConfiguration('kind', '') === 'all';
+    }
+
+    public static function allEquipment($_create = false) {
+        foreach (self::byType(__CLASS__) as $eqLogic) {
+            if ($eqLogic->isAll()) {
+                return $eqLogic;
+            }
+        }
+        if (!$_create) {
+            return null;
+        }
+        $eqLogic = new sonosbe();
+        $eqLogic->setEqType_name(__CLASS__);
+        $eqLogic->setLogicalId('all');
+        $eqLogic->setName(__('Toutes les enceintes', __FILE__));
+        $eqLogic->setIsEnable(1);
+        $eqLogic->setIsVisible(1);
+        $eqLogic->setConfiguration('kind', 'all');
+        $eqLogic->save();
+        return $eqLogic;
     }
 
     /*
-     * Joue un fichier en annonce. Par l'API locale si l'enceinte l'a : le
-     * son en cours baisse, le message passe, tout reprend. Sinon, ou si
-     * l'utilisateur l'a choisi, en interrompant la lecture, rétablie ensuite.
+     * La voix est fabriquée une fois ; chaque enceinte la joue à son volume
+     * (ou à celui du titre), avec son carillon et sa méthode. Les enceintes
+     * qui jouent par-dessus le son partent d'abord : elles rendent la main
+     * aussitôt, quand une annonce avec interruption attend la fin du
+     * message.
      */
-    public function playClip($_clip, $_volume, $_label) {
-        $url = isset($_clip['url']) ? $_clip['url'] : sonosbeVoice::url($_clip['file']);
-        $method = (string) $this->getConfiguration('announce_method', 'auto');
-        $used = '';
-        if ($method !== 'interrupt' && $this->hasAudioClip()) {
+    private function playClipEverywhere($_clip, $_opts) {
+        $players = self::configured();
+        if (empty($players)) {
+            throw new Exception(__('Aucune enceinte active.', __FILE__));
+        }
+        usort($players, function ($a, $b) {
+            $ra = ($a->hasAudioClip() && $a->getConfiguration('announce_method', 'auto') !== 'interrupt') ? 0 : 1;
+            $rb = ($b->hasAudioClip() && $b->getConfiguration('announce_method', 'auto') !== 'interrupt') ? 0 : 1;
+            return $ra - $rb;
+        });
+        $results = array();
+        $errors = array();
+        foreach ($players as $player) {
             try {
-                $this->queuedAudioClip($url, $_volume, isset($_clip['duration']) ? (float) $_clip['duration'] : 0.0);
-                $used = 'clip';
+                $results[$player->getName()] = $player->playClip($_clip, $_opts)['method'];
             } catch (Throwable $e) {
-                if ($method === 'clip') {
-                    throw $e;
-                }
-                log::add(__CLASS__, 'warning', $this->getHumanName() . ' : ' . __('annonce par l\'API locale impossible, on interrompt la lecture à la place.', __FILE__) . ' ' . $e->getMessage());
+                $errors[] = $player->getName() . ' : ' . $e->getMessage();
+                log::add(__CLASS__, 'warning', $player->getHumanName() . ' : ' . $e->getMessage());
             }
         }
-        if ($used === '') {
-            if ($method === 'clip' && !$this->hasAudioClip()) {
-                throw new Exception(__('Cette enceinte n\'a pas l\'API locale des Sonos S2 : choisissez un autre mode d\'annonce.', __FILE__));
-            }
-            $this->announceByInterrupting($url, $_volume, isset($_clip['duration']) ? (float) $_clip['duration'] : 0.0, $_label);
-            $used = 'interrupt';
+        if (empty($results)) {
+            throw new Exception(__('Aucune enceinte n\'a pu faire l\'annonce.', __FILE__) . ' ' . implode(' ; ', $errors));
         }
-        $this->publishCmd('announce_last', $_label);
-        log::add(__CLASS__, 'info', sprintf('%s : %s « %s » (volume %d)', $this->getHumanName(),
-            $used === 'clip' ? __('annonce', __FILE__) : __('annonce avec interruption', __FILE__), $_label, $_volume));
-        return array('method' => $used, 'url' => $url);
+        if ($_opts['remember']) {
+            $this->rememberClip($_clip, $_opts);
+        }
+        return array('method' => 'all', 'players' => $results, 'errors' => $errors, 'url' => '');
     }
 
     /*
      * Deux annonces rapprochées (deux lignes d'un scénario, un scénario et le
-     * micro) se suivent au lieu de se couper : la seconde attend la fin de
-     * la première, dont la durée est connue. Une annonce jouée par URL, de
-     * durée inconnue, n'impose pas d'attente.
+     * micro, le carillon et son message) se suivent au lieu de se couper : la
+     * suivante attend la fin de la précédente, dont la durée est connue. Une
+     * annonce jouée par URL, de durée inconnue, n'impose pas d'attente.
      */
     const CLIP_MAX_WAIT = 60;
 
-    private function queuedAudioClip($_url, $_volume, $_duration) {
+    private function queuedAudioClip($_url, $_volume, $_duration, $_margin = 1.0) {
         $lock = self::lock('clip-' . $this->uid());
         try {
             $busyUntil = (float) $this->getCache('clip_busy_until', 0);
@@ -1133,7 +1345,7 @@ class sonosbe extends eqLogic {
             $this->audioClip($_url, $_volume);
             /* Marge : l'enceinte met un instant à charger le fichier et à
              * baisser le son. */
-            $this->setCache('clip_busy_until', $_duration > 0 ? microtime(true) + $_duration + 1.0 : 0);
+            $this->setCache('clip_busy_until', $_duration > 0 ? microtime(true) + $_duration + $_margin : 0);
         } finally {
             self::unlock($lock);
         }
@@ -1150,12 +1362,13 @@ class sonosbe extends eqLogic {
     }
 
     /*
-     * Annonce sans API locale : on note ce qui joue, on joue le message sur
-     * le coordinateur du groupe, on attend la fin, et on rétablit la source,
-     * la position et le volume. Une file d'attente reprend au morceau et à
-     * la seconde près ; une radio ou la TV, à leur flux.
+     * Annonce sans API locale : on note ce qui joue, on joue les sons (le
+     * carillon puis le message) sur le coordinateur du groupe, on attend la
+     * fin, et on rétablit la source, la position et le volume. Une file
+     * d'attente reprend au morceau et à la seconde près ; une radio ou la
+     * TV, à leur flux.
      */
-    public function announceByInterrupting($_url, $_volume, $_duration, $_label) {
+    public function announceByInterrupting($_items, $_volume, $_label) {
         $group = $this->group();
         $coordinatorIp = $group['coordinator']['ip'];
         $coordinatorUid = $group['coordinator']['uid'];
@@ -1190,9 +1403,11 @@ class sonosbe extends eqLogic {
                 if ($mute) {
                     $rc('SetMute', array('DesiredMute' => 0));
                 }
-                $av('SetAVTransportURI', array('CurrentURI' => $_url, 'CurrentURIMetaData' => sonosbeUpnp::didlForUrl($_url, $_label)));
-                $av('Play', array('Speed' => 1));
-                $this->waitEndOfClip($av, $_duration);
+                foreach ($_items as $item) {
+                    $av('SetAVTransportURI', array('CurrentURI' => $item['url'], 'CurrentURIMetaData' => sonosbeUpnp::didlForUrl($item['url'], $_label, $item['mime'])));
+                    $av('Play', array('Speed' => 1));
+                    $this->waitEndOfClip($av, $item['duration']);
+                }
             } finally {
                 $this->restoreAfterInterrupt($av, $rc, $coordinatorUid, $state, $media, $position, $source, $volume, $mute);
             }
@@ -1286,6 +1501,10 @@ class sonosbe extends eqLogic {
         if ($this->getId() == '') {
             return;
         }
+        $this->createVoiceCommands();
+        if ($this->isAll()) {
+            return;
+        }
         $state = $this->addCmdIfMissing('state', 'Statut', 'info', 'string', array('order' => 1, 'isVisible' => 1, 'generic' => 'MEDIA_STATUS'));
         $playing = $this->addCmdIfMissing('playing', 'En lecture', 'info', 'binary', array('order' => 2));
         $volume = $this->addCmdIfMissing('volume', 'Volume', 'info', 'numeric', array('order' => 3, 'generic' => 'VOLUME', 'unite' => '%', 'min' => 0, 'max' => 100));
@@ -1303,7 +1522,6 @@ class sonosbe extends eqLogic {
         $treble = $this->addCmdIfMissing('treble', 'Aigus', 'info', 'numeric', array('order' => 14, 'min' => -10, 'max' => 10));
         $loudness = $this->addCmdIfMissing('loudness', 'Loudness', 'info', 'binary', array('order' => 15));
         $this->addCmdIfMissing('online', 'En ligne', 'info', 'binary', array('order' => 16));
-        $this->addCmdIfMissing('announce_last', 'Dernière annonce', 'info', 'string', array('order' => 17));
 
         $this->addCmdIfMissing('previous', 'Précédent', 'action', 'other', array('order' => 100, 'isVisible' => 1, 'generic' => 'MEDIA_PREVIOUS',
             'display' => array('icon' => '<i class="fas fa-step-backward"></i>', 'showNameOndashboard' => 0)));
@@ -1325,14 +1543,6 @@ class sonosbe extends eqLogic {
         $this->addCmdIfMissing('mute_on', 'Couper le son', 'action', 'other', array('order' => 109, 'generic' => 'MEDIA_MUTE', 'value' => $mute));
         $this->addCmdIfMissing('mute_off', 'Rétablir le son', 'action', 'other', array('order' => 110, 'generic' => 'MEDIA_UNMUTE', 'value' => $mute));
         $this->addCmdIfMissing('favorite', 'Jouer un favori', 'action', 'select', array('order' => 111, 'isVisible' => 1));
-        $this->addCmdIfMissing('play_url', 'Jouer un son', 'action', 'message', array('order' => 112,
-            'display' => array('title_placeholder' => __('Volume (vide : celui des annonces)', __FILE__),
-                               'message_placeholder' => __('URL http://… ou chemin d\'un fichier audio', __FILE__))));
-        $this->addCmdIfMissing('announce', 'Annonce', 'action', 'message', array('order' => 113, 'isVisible' => 1,
-            'display' => array('title_placeholder' => __('Volume (vide : celui des annonces)', __FILE__),
-                               'message_placeholder' => __('Texte à dire', __FILE__))));
-        $this->addCmdIfMissing('micro', 'Message vocal', 'action', 'other', array('order' => 114, 'isVisible' => 1,
-            'template' => 'sonosbe::micro'));
         $this->addCmdIfMissing('join', 'Rejoindre le groupe de', 'action', 'select', array('order' => 115));
         $this->addCmdIfMissing('leave', 'Quitter le groupe', 'action', 'other', array('order' => 116));
         $this->addCmdIfMissing('sleep_set', 'Minuterie de veille', 'action', 'slider', array('order' => 117, 'value' => $sleep, 'min' => 0, 'max' => 180));
@@ -1344,6 +1554,7 @@ class sonosbe extends eqLogic {
             'display' => array('icon' => '<i class="fas fa-sync"></i>', 'showNameOndashboard' => 0)));
 
         if ($this->isHomeTheater()) {
+            $this->addCmdIfMissing('tv_active', 'TV en cours', 'info', 'binary', array('order' => 19));
             $night = $this->addCmdIfMissing('night', 'Mode nuit', 'info', 'binary', array('order' => 20));
             $speech = $this->addCmdIfMissing('speech', 'Dialogues renforcés', 'info', 'binary', array('order' => 21));
             $this->addCmdIfMissing('tv', 'Passer sur la TV', 'action', 'other', array('order' => 130, 'isVisible' => 1,
@@ -1361,6 +1572,25 @@ class sonosbe extends eqLogic {
             $cmd->setConfiguration('listValue', implode(';', array_map(function ($f) { $t = self::listText($f['title']); return $t . '|' . $t; }, $favorites)));
             $cmd->save();
         }
+    }
+
+    /* Annonces : sur chaque enceinte et sur « Toutes les enceintes ». Le
+     * titre porte le volume et des mots-clés (carillon, sans-carillon,
+     * urgent). */
+    private function createVoiceCommands() {
+        $options = __('Volume et options : 40 carillon urgent', __FILE__);
+        $this->addCmdIfMissing('announce_last', 'Dernière annonce', 'info', 'string', array('order' => 17));
+        $this->addCmdIfMissing('announce', 'Annonce', 'action', 'message', array('order' => 113, 'isVisible' => 1,
+            'display' => array('title_placeholder' => $options, 'message_placeholder' => __('Texte à dire', __FILE__))));
+        $this->addCmdIfMissing('play_url', 'Jouer un son', 'action', 'message', array('order' => 112,
+            'display' => array('title_placeholder' => $options,
+                               'message_placeholder' => __('URL http://… ou chemin d\'un fichier audio', __FILE__))));
+        $this->addCmdIfMissing('micro', 'Message vocal', 'action', 'other', array('order' => 114, 'isVisible' => 1,
+            'template' => 'sonosbe::micro'));
+        $this->addCmdIfMissing('replay', 'Rejouer la dernière annonce', 'action', 'other', array('order' => 140,
+            'display' => array('icon' => '<i class="fas fa-redo"></i>')));
+        $this->addCmdIfMissing('prepare', 'Préparer une annonce', 'action', 'message', array('order' => 141,
+            'display' => array('title_disable' => 1, 'message_placeholder' => __('Texte à fabriquer à l\'avance, sans le jouer', __FILE__))));
     }
 
     private function addCmdIfMissing($_logicalId, $_name, $_type, $_subType, $_options = array()) {
@@ -1404,6 +1634,10 @@ class sonosbe extends eqLogic {
     /* ================================================================ PAGE */
 
     public function toAjax() {
+        if ($this->isAll()) {
+            return array('id' => $this->getId(), 'all' => true,
+                         'players' => array_map(function ($eq) { return $eq->getName(); }, self::configured()));
+        }
         $group = $this->group();
         $caps = array_values(array_filter(explode(',', (string) $this->getConfiguration('capabilities', ''))));
         return array(

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0 — 26/09/2026
+
+- Carillon avant les annonces : réglage par enceinte, ou mot-clé
+  `carillon` / `sans-carillon` dans le titre.
+- Titre des commandes d'annonce : volume et mots-clés (`40 carillon urgent`).
+- Équipement « Toutes les enceintes » : une annonce, un son ou un message
+  vocal sur chaque enceinte active, voix fabriquée une seule fois.
+- Plage de nuit : volume plafonné, annonces des scénarios retenues si on le
+  souhaite ; `urgent` passe toujours.
+- Commandes « Rejouer la dernière annonce » et « Préparer une annonce ».
+- Info « TV en cours » sur les barres de son.
+- Bouton « Tester l'accès des enceintes » : chaque enceinte joue un
+  carillon, le plugin vérifie qu'elle est venue le chercher.
+- Les fichiers audio sont servis par un script du plugin : le .htaccess de
+  Jeedom refusait les WAV (voix sans ffmpeg, carillon) et les M4A.
+
 ## 0.1.1 — 26/09/2026
 
 - Recherche SSDP : les réponses des enceintes étaient toutes rejetées.

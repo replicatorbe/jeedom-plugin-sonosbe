@@ -90,12 +90,26 @@ class sonosbeVoice {
     }
 
     public static function url($_file) {
+        return self::baseUrl() . '/' . self::relativeUrl($_file);
+    }
+
+    /* Chemin servi par core/php/sonosbeAudio.php, et non par Apache
+     * directement : le .htaccess de Jeedom refuse les WAV et les M4A. */
+    public static function relativeUrl($_file) {
         $real = realpath($_file);
-        if ($real === false) {
+        $root = realpath(self::dataDir() . '/audio');
+        if ($real === false || $root === false || strpos($real, $root . DIRECTORY_SEPARATOR) !== 0) {
             throw new Exception(__('Fichier audio introuvable :', __FILE__) . ' ' . $_file);
         }
-        $relative = substr($real, strlen(realpath(self::dataDir() . '/..')));
-        return self::baseUrl() . '/plugins/sonosbe' . str_replace(DIRECTORY_SEPARATOR, '/', $relative);
+        return 'plugins/sonosbe/core/php/sonosbeAudio.php?f=' . str_replace(DIRECTORY_SEPARATOR, '/', substr($real, strlen($root) + 1));
+    }
+
+    /* Type MIME d'après l'extension, pour les métadonnées UPnP. */
+    public static function mimeOf($_name) {
+        $types = array('mp3' => 'audio/mpeg', 'wav' => 'audio/wav', 'm4a' => 'audio/mp4', 'aac' => 'audio/aac',
+                       'flac' => 'audio/flac', 'ogg' => 'audio/ogg');
+        $ext = strtolower(pathinfo((string) parse_url((string) $_name, PHP_URL_PATH), PATHINFO_EXTENSION));
+        return isset($types[$ext]) ? $types[$ext] : 'audio/mpeg';
     }
 
     /* ============================================================= SYNTHÈSE */
@@ -449,6 +463,107 @@ class sonosbeVoice {
         return 'RIFF' . pack('V', 36 + strlen($data)) . 'WAVE'
              . 'fmt ' . pack('VvvVVvv', 16, $fmt['format'], $fmt['channels'], $fmt['rate'], $fmt['byterate'], $fmt['block'], $fmt['bits'])
              . 'data' . pack('V', strlen($data)) . $data;
+    }
+
+    /* ============================================================= OPTIONS */
+
+    /*
+     * Le titre d'une commande d'annonce : un volume et des mots-clés, dans
+     * n'importe quel ordre — « 40 », « 40 % carillon », « urgent ». Rend
+     * volume (null : celui de l'équipement), chime (null : réglage de
+     * l'équipement) et urgent (passe outre la plage de nuit).
+     */
+    public static function titleOptions($_title) {
+        $options = array('volume' => null, 'chime' => null, 'urgent' => false);
+        $title = function_exists('mb_strtolower') ? mb_strtolower((string) $_title, 'UTF-8') : strtolower((string) $_title);
+        foreach (preg_split('/[\s,;]+/u', trim($title)) as $word) {
+            $number = rtrim($word, '%');
+            if ($number !== '' && is_numeric($number)) {
+                $options['volume'] = max(0, min(100, (int) round((float) $number)));
+            } elseif (in_array($word, array('carillon', 'ding', 'chime'), true)) {
+                $options['chime'] = true;
+            } elseif (in_array($word, array('sans-carillon', 'sanscarillon', 'nochime', '-carillon'), true)) {
+                $options['chime'] = false;
+            } elseif (in_array($word, array('urgent', 'urgence'), true)) {
+                $options['urgent'] = true;
+            }
+        }
+        return $options;
+    }
+
+    /* Plage de nuit : « 22:00 » à « 07:00 » passe minuit. Des bornes égales
+     * ou illisibles ne couvrent rien. */
+    public static function inTimeRange($_now, $_start, $_end) {
+        $minutes = function ($_hhmm) {
+            return preg_match('/^(\d{1,2})[:hH](\d{2})$/', trim((string) $_hhmm), $m) && (int) $m[1] < 24 && (int) $m[2] < 60
+                ? (int) $m[1] * 60 + (int) $m[2] : null;
+        };
+        $now = $minutes($_now);
+        $start = $minutes($_start);
+        $end = $minutes($_end);
+        if ($now === null || $start === null || $end === null || $start === $end) {
+            return false;
+        }
+        return $start < $end ? ($now >= $start && $now < $end) : ($now >= $start || $now < $end);
+    }
+
+    public static function nightActive() {
+        return (int) config::byKey('night_enable', 'sonosbe', 0) === 1
+            && self::inTimeRange(date('H:i'), config::byKey('night_start', 'sonosbe', '22:00'), config::byKey('night_end', 'sonosbe', '07:00'));
+    }
+
+    public static function nightVolume() {
+        $volume = config::byKey('night_volume', 'sonosbe', 15);
+        return is_numeric($volume) ? max(0, min(100, (int) $volume)) : 15;
+    }
+
+    /* ============================================================ CARILLON */
+
+    const CHIME_FILE = 'chime-v1.wav';
+
+    /*
+     * Un « ding-dong » de sonnette, calculé ici : deux notes (mi puis do)
+     * avec leurs harmoniques et une décroissance de cloche. Aucun fichier à
+     * fournir, le même son sur une S1 et une S2, et une durée connue, qui
+     * permet d'enchaîner le message juste après.
+     */
+    public static function chimeWav($_rate = 44100) {
+        $notes = array(array('at' => 0.0, 'freq' => 659.25), array('at' => 0.5, 'freq' => 523.25));
+        $partials = array(array(1.0, 1.0), array(2.0, 0.35), array(3.0, 0.12), array(4.2, 0.05));
+        $length = 1.9;
+        $count = (int) round($length * $_rate);
+        $pcm = '';
+        for ($i = 0; $i < $count; $i++) {
+            $t = $i / $_rate;
+            $sample = 0.0;
+            foreach ($notes as $note) {
+                $u = $t - $note['at'];
+                if ($u < 0) {
+                    continue;
+                }
+                $envelope = min(1.0, $u / 0.006) * exp(-3.2 * $u);
+                foreach ($partials as $partial) {
+                    $sample += $partial[1] * $envelope * sin(2 * M_PI * $note['freq'] * $partial[0] * $u);
+                }
+            }
+            /* Fondu final : pas de clic à la coupure. */
+            $fade = min(1.0, ($length - $t) / 0.05);
+            $pcm .= pack('v', (int) round(max(-1.0, min(1.0, 0.34 * $sample * $fade)) * 32767) & 0xFFFF);
+        }
+        return 'RIFF' . pack('V', 36 + strlen($pcm)) . 'WAVE'
+             . 'fmt ' . pack('VvvVVvv', 16, 1, 1, $_rate, $_rate * 2, 2, 16)
+             . 'data' . pack('V', strlen($pcm)) . $pcm;
+    }
+
+    /* Le carillon, fabriqué au premier usage ; refait s'il a été purgé. */
+    public static function chimeFile() {
+        $file = self::audioDir('cache') . '/' . self::CHIME_FILE;
+        if (!is_file($file)) {
+            $tmp = $file . '.' . getmypid() . '.part';
+            file_put_contents($tmp, self::chimeWav());
+            rename($tmp, $file);
+        }
+        return $file;
     }
 
     /* ============================================================ ENTRETIEN */

@@ -83,8 +83,10 @@ try {
             throw new Exception(__('Enregistrement non reçu.', __FILE__));
         }
         $clip = sonosbeVoice::recording($_FILES['audio']['tmp_name'], (string) $_FILES['audio']['type']);
-        $volume = init('volume', '');
-        ajax::success($eqLogic->playClip($clip, $eqLogic->announceVolume($volume), __('Message vocal', __FILE__)));
+        /* Quelqu'un vient de parler dans le micro : la plage de nuit baisse
+         * le volume, mais ne retient pas le message. */
+        ajax::success($eqLogic->playClip($clip, array('title' => (string) init('volume', ''),
+            'label' => __('Message vocal', __FILE__), 'manual' => true)));
     }
 
     /* ------------------------------------------------------------------
@@ -140,6 +142,9 @@ try {
 
     if (init('action') == 'refresh') {
         $eqLogic = sonosbeEq();
+        if ($eqLogic->isAll()) {
+            ajax::success($eqLogic->toAjax());
+        }
         sonosbe::refreshTopology(array($eqLogic));
         sonosbe::refreshFavorites(array($eqLogic));
         try {
@@ -157,14 +162,26 @@ try {
 
     /* Essai d'annonce depuis la page de l'équipement. */
     if (init('action') == 'say') {
-        ajax::success(sonosbeEq()->announce(init('text'), init('volume')));
+        ajax::success(sonosbeEq()->announce(init('text'), init('volume'), true));
     }
 
     /* Écoute dans le navigateur, sans passer par une enceinte. */
     if (init('action') == 'preview') {
         $clip = sonosbeVoice::speak(init('text'));
-        ajax::success(array('url' => 'plugins/sonosbe/data/audio/cache/' . basename($clip['file']) . '?t=' . time(),
+        ajax::success(array('url' => sonosbeVoice::relativeUrl($clip['file']) . '&t=' . time(),
                             'engine' => $clip['engine'], 'duration' => $clip['duration'], 'cached' => $clip['cached']));
+    }
+
+    /* L'équipement « Toutes les enceintes », créé à la demande. */
+    if (init('action') == 'createAll') {
+        unautorizedInDemo();
+        ajax::success(array('id' => sonosbe::allEquipment(true)->getId()));
+    }
+
+    /* Chaque enceinte joint-elle Jeedom ? Joue un carillon sur chacune. */
+    if (init('action') == 'testAccess') {
+        unautorizedInDemo();
+        ajax::success(sonosbe::testAccess());
     }
 
     if (init('action') == 'piperStatus') {

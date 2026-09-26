@@ -103,6 +103,47 @@ require_once __DIR__ . '/../core/class/sonosbe.class.php';
 			</div>
 		</div>
 
+		<legend><i class="fas fa-moon"></i> {{Plage de nuit}}</legend>
+		<div class="form-group">
+			<label class="col-md-4 control-label">{{Activer}}</label>
+			<div class="col-md-1">
+				<input type="checkbox" class="configKey" data-l1key="night_enable">
+			</div>
+			<div class="col-md-6">
+				<span class="help-block" style="margin:0;">{{Pendant cette plage, les annonces passent au volume de nuit, sur toutes les enceintes. Une annonce dont le titre contient « urgent » (alarme, fumée) garde son volume et passe toujours.}}</span>
+			</div>
+		</div>
+		<div class="form-group">
+			<label class="col-md-4 control-label">{{De … à …}}</label>
+			<div class="col-md-2">
+				<input type="time" class="configKey form-control" data-l1key="night_start" placeholder="22:00">
+			</div>
+			<div class="col-md-2">
+				<input type="time" class="configKey form-control" data-l1key="night_end" placeholder="07:00">
+			</div>
+		</div>
+		<div class="form-group">
+			<label class="col-md-4 control-label">{{Volume de nuit}}</label>
+			<div class="col-md-2">
+				<div class="input-group">
+					<input type="number" class="configKey form-control" data-l1key="night_volume" min="0" max="100" placeholder="15">
+					<span class="input-group-addon">%</span>
+				</div>
+			</div>
+			<div class="col-md-5">
+				<span class="help-block" style="margin:0;">{{Un plafond : une annonce prévue plus bas reste plus basse.}}</span>
+			</div>
+		</div>
+		<div class="form-group">
+			<label class="col-md-4 control-label">{{Retenir les annonces des scénarios}}</label>
+			<div class="col-md-1">
+				<input type="checkbox" class="configKey" data-l1key="night_block">
+			</div>
+			<div class="col-md-6">
+				<span class="help-block" style="margin:0;">{{La nuit, les scénarios se taisent, sauf « urgent ». Ce que quelqu'un déclenche lui-même (micro, bouton du dashboard, « Rejouer ») passe toujours, au volume de nuit.}}</span>
+			</div>
+		</div>
+
 		<legend><i class="fas fa-network-wired"></i> {{Réseau}}</legend>
 		<div class="form-group">
 			<label class="col-md-4 control-label">{{Adresse de Jeedom pour les enceintes}}</label>
@@ -111,6 +152,15 @@ require_once __DIR__ . '/../core/class/sonosbe.class.php';
 			</div>
 			<div class="col-md-4">
 				<span class="help-block" style="margin:0;">{{Les enceintes viennent chercher chaque message à cette adresse. Vide : l'accès interne de Jeedom. Mettez une adresse en http:// : un Sonos refuse un certificat auto-signé.}}</span>
+			</div>
+		</div>
+
+		<div class="form-group">
+			<label class="col-md-4 control-label">{{Vérifier}}</label>
+			<div class="col-md-8">
+				<a class="btn btn-default btn-sm" id="bt_sonosbeTestAccess"><i class="fas fa-satellite-dish"></i> {{Tester l'accès des enceintes}}</a>
+				<span class="help-block" style="margin:4px 0 0 0;">{{Chaque enceinte active joue un court carillon, servi par Jeedom : le plugin vérifie qu'elle est bien venue le chercher. Enregistrez d'abord la configuration.}}</span>
+				<div id="div_sonosbeTestAccess" style="margin-top:6px;"></div>
 			</div>
 		</div>
 
@@ -242,6 +292,26 @@ require_once __DIR__ . '/../core/class/sonosbe.class.php';
 			alertBox('{{Voix fabriquée par}} ' + _result.engine + (_result.cached ? ' {{(déjà en cache)}}' : ''), 'success')
 		}).catch(function (_error) {
 			button.classList.remove('disabled')
+			alertBox(_error.message, 'danger')
+		})
+	})
+
+	document.getElementById('bt_sonosbeTestAccess').addEventListener('click', function () {
+		var button = this
+		var target = document.getElementById('div_sonosbeTestAccess')
+		if (button.classList.contains('disabled')) { return }
+		button.classList.add('disabled')
+		target.textContent = '{{Test en cours : chaque enceinte va jouer un carillon…}}'
+		call('testAccess').then(function (_rows) {
+			button.classList.remove('disabled')
+			target.innerHTML = ''
+			_rows.forEach(function (_row) {
+				var div = line(_row.ok, _row.test + ' : ' + _row.detail)
+				target.appendChild(div)
+			})
+		}).catch(function (_error) {
+			button.classList.remove('disabled')
+			target.textContent = ''
 			alertBox(_error.message, 'danger')
 		})
 	})

@@ -16,6 +16,8 @@ depuis le dashboard.
 | `core/class/sonosbeUpnp.class.php` | Protocole UPnP (port 1400), toutes les enceintes |
 | `core/class/sonosbeWs.class.php` | API locale des S2 (websocket, port 1443), pour les annonces |
 | `core/class/sonosbeVoice.class.php` | Synthèse vocale, messages du micro, fichiers audio |
+| `core/php/sonosbeAudio.php` | Sert les fichiers audio aux enceintes (WAV et M4A compris, que le .htaccess de Jeedom refuse) |
+| `core/php/sonosbeProbe.php` | Témoin du test d'accès des enceintes |
 | `desktop/js/sonosbeMic.js` | Enregistrement au micro, partagé par le widget et la page |
 | `resources/install-piper.sh` | Téléchargement de Piper et d'une voix |
 

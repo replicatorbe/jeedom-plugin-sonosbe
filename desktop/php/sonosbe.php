@@ -21,6 +21,11 @@ $eqLogics = eqLogic::byType($plugin->getId());
 				<br>
 				<span>{{Ajouter par adresse IP}}</span>
 			</div>
+			<div class="cursor logoSecondary" id="bt_sonosbeAll">
+				<i class="fas fa-broadcast-tower"></i>
+				<br>
+				<span>{{Toutes les enceintes}}</span>
+			</div>
 			<div class="cursor eqLogicAction logoSecondary" data-action="gotoPluginConf">
 				<i class="fas fa-wrench"></i>
 				<br>
@@ -51,7 +56,7 @@ $eqLogics = eqLogic::byType($plugin->getId());
 		foreach ($eqLogics as $eqLogic) {
 			$opacity = ($eqLogic->getIsEnable()) ? '' : 'disableCard';
 			echo '<div class="eqLogicDisplayCard cursor ' . $opacity . '" data-eqLogic_id="' . $eqLogic->getId() . '">';
-			echo '<i class="' . ($eqLogic->isHomeTheater() ? 'fas fa-tv' : 'fas fa-volume-up') . '" style="font-size:4em;"></i>';
+			echo '<i class="' . ($eqLogic->isAll() ? 'fas fa-broadcast-tower' : ($eqLogic->isHomeTheater() ? 'fas fa-tv' : 'fas fa-volume-up')) . '" style="font-size:4em;"></i>';
 			echo '<br>';
 			echo '<span class="name">' . $eqLogic->getHumanName(true, true) . '</span>';
 			echo '<span class="hiddenAsCard displayTableRight hidden">';
@@ -134,7 +139,15 @@ $eqLogics = eqLogic::byType($plugin->getId());
 							</div>
 						</fieldset>
 
-						<fieldset>
+						<fieldset class="sonosbeAllOnly" style="display:none;">
+							<legend><i class="fas fa-broadcast-tower"></i> {{Toutes les enceintes}}</legend>
+							<div class="alert alert-info">
+								{{Les annonces, sons et messages vocaux de cet équipement partent sur chaque enceinte active, chacune à son volume d'annonce, avec son carillon et sa méthode. La voix n'est fabriquée qu'une fois.}}
+								<div id="div_sonosbeAllPlayers" style="margin-top:6px;"></div>
+							</div>
+						</fieldset>
+
+						<fieldset class="sonosbeDeviceOnly">
 							<legend><i class="fas fa-bullhorn"></i> {{Annonces}}</legend>
 							<div class="form-group">
 								<label class="col-sm-3 control-label">{{Volume}}</label>
@@ -145,7 +158,14 @@ $eqLogics = eqLogic::byType($plugin->getId());
 									</div>
 								</div>
 								<div class="col-sm-6">
-									<span class="help-block" style="margin:0;">{{Volume des annonces et des messages vocaux. Dans un scénario, le titre de la commande « Annonce » le remplace pour un message.}}</span>
+									<span class="help-block" style="margin:0;">{{Volume des annonces et des messages vocaux. Dans un scénario, le titre de la commande « Annonce » peut le remplacer et ajouter des mots-clés : « 40 », « 40 carillon », « sans-carillon », « urgent » (passe outre la plage de nuit).}}</span>
+								</div>
+							</div>
+							<div class="form-group">
+								<label class="col-sm-3 control-label">{{Carillon}}</label>
+								<div class="col-sm-9">
+									<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="announce_chime">
+									<span class="help-block" style="margin:4px 0 0 0;">{{Un « ding-dong » avant chaque annonce, pour attirer l'attention avant les premiers mots. Le mot-clé « carillon » ou « sans-carillon » dans le titre décide pour une annonce.}}</span>
 								</div>
 							</div>
 							<div class="form-group">
@@ -187,7 +207,7 @@ $eqLogics = eqLogic::byType($plugin->getId());
 					</form>
 				</div>
 
-				<div class="col-lg-6">
+				<div class="col-lg-6 sonosbeDeviceOnly">
 					<form class="form-horizontal">
 						<fieldset>
 							<legend><i class="fas fa-plug"></i> {{Enceinte}}</legend>

@@ -232,5 +232,37 @@ check('balises et retours à la ligne', sonosbeVoice::cleanText("<b>Bonjour</b>\
 check('entités', sonosbeVoice::cleanText('Porte d&#39;entr&eacute;e'), 'Porte d\'entrée');
 check('texte vide', sonosbeVoice::cleanText(" \n "), '');
 
+section('Titre d\'une annonce');
+check('vide : réglages de l\'équipement', sonosbeVoice::titleOptions(''), array('volume' => null, 'chime' => null, 'urgent' => false));
+check('« 40 »', sonosbeVoice::titleOptions('40')['volume'], 40);
+check('« 40 % »', sonosbeVoice::titleOptions('40 %')['volume'], 40);
+check('« 35% carillon »', sonosbeVoice::titleOptions('35% carillon'), array('volume' => 35, 'chime' => true, 'urgent' => false));
+check('« Urgent, 80 » (casse, virgule)', sonosbeVoice::titleOptions('Urgent, 80'), array('volume' => 80, 'chime' => null, 'urgent' => true));
+check('« sans-carillon »', sonosbeVoice::titleOptions('sans-carillon')['chime'], false);
+check('volume borné à 100', sonosbeVoice::titleOptions('250')['volume'], 100);
+check('mot inconnu ignoré', sonosbeVoice::titleOptions('bonjour'), array('volume' => null, 'chime' => null, 'urgent' => false));
+
+section('Plage de nuit');
+check('23:30 dans 22:00–07:00', sonosbeVoice::inTimeRange('23:30', '22:00', '07:00'), true);
+check('03:00 dans 22:00–07:00', sonosbeVoice::inTimeRange('03:00', '22:00', '07:00'), true);
+check('07:00 hors de 22:00–07:00 (fin exclue)', sonosbeVoice::inTimeRange('07:00', '22:00', '07:00'), false);
+check('12:00 hors de 22:00–07:00', sonosbeVoice::inTimeRange('12:00', '22:00', '07:00'), false);
+check('13:00 dans 12:30–14:00 (même jour)', sonosbeVoice::inTimeRange('13:00', '12:30', '14:00'), true);
+check('bornes égales : jamais', sonosbeVoice::inTimeRange('10:00', '10:00', '10:00'), false);
+check('borne illisible : jamais', sonosbeVoice::inTimeRange('10:00', '', '07:00'), false);
+check('format 22h00 accepté', sonosbeVoice::inTimeRange('22:10', '22h00', '6h30'), true);
+
+section('Carillon');
+$chime = sonosbeVoice::chimeWav();
+check('durée connue', sonosbeVoice::wavDuration($chime), 1.9);
+check('WAV lisible', sonosbeVoice::wavInfo($chime)['fmt']['rate'], 44100);
+$peak = 0;
+foreach (unpack('s*', substr($chime, 44)) as $sample) {
+    $peak = max($peak, abs($sample));
+}
+check('pas de saturation', $peak < 32767, true);
+check('audible', $peak > 8000, true);
+check('silence à la fin (fondu)', abs(unpack('s', substr($chime, -2))[1]) < 50, true);
+
 printf("\n%d réussi(s), %d échec(s)\n", $passed, $failed);
 exit($failed === 0 ? 0 : 1);

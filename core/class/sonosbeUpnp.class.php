@@ -399,12 +399,12 @@ class sonosbeUpnp {
     }
 
     /* DIDL minimal pour jouer un fichier audio par son URL. */
-    public static function didlForUrl($_url, $_title) {
+    public static function didlForUrl($_url, $_title, $_mime = 'audio/mpeg') {
         return '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"'
              . ' xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'
              . '<item id="jeedom" parentID="-1" restricted="true"><dc:title>' . self::xml($_title) . '</dc:title>'
              . '<upnp:class>object.item.audioItem.musicTrack</upnp:class>'
-             . '<res protocolInfo="http-get:*:audio/mpeg:*">' . self::xml($_url) . '</res></item></DIDL-Lite>';
+             . '<res protocolInfo="http-get:*:' . self::xml($_mime) . ':*">' . self::xml($_url) . '</res></item></DIDL-Lite>';
     }
 }
 

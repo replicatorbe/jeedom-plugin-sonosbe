@@ -1,7 +1,4 @@
-# Les enceintes Sonos viennent lire ici les messages, en HTTP et sans session
-# Jeedom. Seuls les fichiers audio sont servis ; leurs noms sont aléatoires.
-Order deny,allow
+# Aucun accès direct : les enceintes lisent les messages par
+# core/php/sonosbeAudio.php, qui sert aussi les WAV et les M4A que le
+# .htaccess racine de Jeedom refuse.
 Deny from all
-<FilesMatch "\.(mp3|wav|m4a|aac|flac|ogg)$">
-    Allow from all
-</FilesMatch>
