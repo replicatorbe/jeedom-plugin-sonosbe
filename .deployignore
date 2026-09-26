@@ -1,0 +1,7 @@
+# Jeux d'essai hors ligne : outils de développement, inutiles côté Jeedom.
+tests/
+# Fabriqué par Jeedom à l'exécution, jamais écrasé ni effacé au déploiement :
+# Piper et ses voix (plus de 100 Mo), messages audio en cache.
+/data/piper/
+/data/audio/cache/
+/data/audio/rec/

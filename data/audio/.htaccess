@@ -1,0 +1,7 @@
+# Les enceintes Sonos viennent lire ici les messages, en HTTP et sans session
+# Jeedom. Seuls les fichiers audio sont servis ; leurs noms sont aléatoires.
+Order deny,allow
+Deny from all
+<FilesMatch "\.(mp3|wav|m4a|aac|flac|ogg)$">
+    Allow from all
+</FilesMatch>

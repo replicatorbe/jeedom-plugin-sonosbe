@@ -1,0 +1,29 @@
+<div class="cmd cmd-widget" data-type="info" data-subtype="string" data-template="cover" data-cmd_id="#id#" data-cmd_uid="#uid#" data-version="#version#" data-eqLogic_id="#eqLogic_id#">
+  <div class="content" style="text-align:center;">
+    <img class="sonosbeCover" alt="" style="display:none;width:110px;height:110px;object-fit:cover;border-radius:6px;">
+    <i class="fas fa-music sonosbeCoverNone" style="font-size:48px;opacity:.25;padding:30px;"></i>
+  </div>
+  <script>
+    jeedom.cmd.addUpdateFunction('#id#', function (_options) {
+      var cmd = document.querySelector('.cmd[data-cmd_uid="#uid#"]')
+      if (!cmd) { return }
+      var img = cmd.querySelector('.sonosbeCover')
+      var none = cmd.querySelector('.sonosbeCoverNone')
+      var url = String(_options.value || '')
+      if (url === '') {
+        img.style.display = 'none'
+        img.removeAttribute('src')
+        none.style.display = ''
+        return
+      }
+      /* L'image passe par Jeedom : l'enceinte ne la sert qu'en HTTP, sur le
+         réseau local. Le paramètre v change avec le morceau. */
+      var hash = 0
+      for (var i = 0; i < url.length; i++) { hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0 }
+      img.onerror = function () { img.style.display = 'none'; none.style.display = '' }
+      img.onload = function () { img.style.display = ''; none.style.display = 'none' }
+      img.src = 'plugins/sonosbe/core/ajax/sonosbe.ajax.php?action=cover&id=#eqLogic_id#&v=' + (hash >>> 0).toString(16)
+    })
+    jeedom.cmd.refreshValue([{ cmd_id: '#id#', value: '#value#', display_value: '#state#', valueDate: '#valueDate#', collectDate: '#collectDate#', alertLevel: '#alertLevel#', unit: '#unite#' }])
+  </script>
+</div>

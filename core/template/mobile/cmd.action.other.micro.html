@@ -1,0 +1,24 @@
+<div class="cmd cmd-widget reportModeHidden" data-type="action" data-subtype="other" data-template="micro" data-cmd_id="#id#" data-cmd_uid="#uid#" data-version="#version#" data-eqLogic_id="#eqLogic_id#">
+  <div class="content">
+    <a class="ui-btn ui-mini ui-btn-inline ui-btn-raised sonosbeMicButton" data-label=" #name_display#" title="{{Un clic pour enregistrer, un second pour envoyer à l'enceinte}}"><i class="fas fa-microphone"></i><span class="sonosbeMicLabel"> #name_display#</span></a>
+  </div>
+  <script>
+    (function () {
+      var cmd = document.querySelector('.cmd[data-cmd_uid="#uid#"]')
+      if (!cmd) { return }
+      /* Le module d'enregistrement est commun à tous les widgets : chargé une
+         seule fois, au premier affichage. */
+      if (!window.sonosbeMic && !document.getElementById('sonosbeMicScript')) {
+        var script = document.createElement('script')
+        script.id = 'sonosbeMicScript'
+        script.src = 'plugins/sonosbe/desktop/js/sonosbeMic.js'
+        document.head.appendChild(script)
+      }
+      cmd.querySelector('.sonosbeMicButton').addEventListener('click', function (_event) {
+        _event.preventDefault()
+        if (!window.sonosbeMic) { return }
+        window.sonosbeMic.toggle(this, { cmd_id: '#id#' })
+      })
+    })()
+  </script>
+</div>
