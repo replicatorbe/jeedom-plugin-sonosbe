@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 — 11/10/2026
+
+- Micro du widget : le module d'enregistrement est chargé par
+  `core/php/getResource.php`. Appelé en direct, le fichier était refusé par
+  Jeedom (HTTP 403, le `.htaccess` du coeur bloque les `.js` sous `desktop/`)
+  et le bouton micro du dashboard et du mobile restait sans effet.
+
 ## 0.4.0 — 26/09/2026
 
 - Widget sur mesure : carte média avec pochette et fond flouté, couleur

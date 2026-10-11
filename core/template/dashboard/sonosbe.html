@@ -381,7 +381,7 @@
       if (!window.sonosbeMic && !document.getElementById('sonosbeMicScript')) {
         const script = document.createElement('script')
         script.id = 'sonosbeMicScript'
-        script.src = 'plugins/sonosbe/desktop/js/sonosbeMic.js'
+        script.src = 'core/php/getResource.php?file=plugins/sonosbe/desktop/js/sonosbeMic.js'
         document.head.appendChild(script)
       }
       if (!ids.micro) { $('mic').style.display = 'none' }
