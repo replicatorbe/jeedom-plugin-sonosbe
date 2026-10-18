@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2 — 18/10/2026
+
+- Pochette, titre, artiste, album et station ne sont plus réécrits à chaque
+  minute quand rien ne joue : le coeur de Jeedom compte une ancienne valeur
+  vide comme un changement, d'où cinq événements inutiles par minute et par
+  enceinte (date de valeur avancée, déclencheurs de scénarios évalués, widget
+  rafraîchi). Le passage d'une valeur à vide, en fin de lecture, est toujours
+  publié.
+
 ## 0.4.1 — 11/10/2026
 
 - Micro du widget : le module d'enregistrement est chargé par

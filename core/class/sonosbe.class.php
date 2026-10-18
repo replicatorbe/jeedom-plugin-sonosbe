@@ -1050,15 +1050,24 @@ class sonosbe extends eqLogic {
     }
 
     /* Écriture d'une valeur. Ce nom, et surtout pas setCmd() : utils::a2o()
-     * appelle « set » + chaque clé du formulaire, et la page envoie « cmd ». */
+     * appelle « set » + chaque clé du formulaire, et la page envoie « cmd ».
+     * Une valeur vide sur une commande déjà vide n'est pas réécrite : le coeur
+     * traite toujours une ancienne valeur vide comme un changement, et
+     * pochette, titre, artiste, album et station, vides quand rien ne joue,
+     * émettraient un évènement à chaque cron. Le passage d'une valeur à vide,
+     * lui, passe toujours. */
     private function publishCmd($_logicalId, $_value) {
         if ($_value === null) {
             return;
         }
         $cmd = $this->getCmd('info', $_logicalId);
-        if (is_object($cmd)) {
-            $this->checkAndUpdateCmd($cmd, $_value);
+        if (!is_object($cmd)) {
+            return;
         }
+        if ($_value === '' && $cmd->execCmd() === '') {
+            return;
+        }
+        $this->checkAndUpdateCmd($cmd, $_value);
     }
 
     public function noteFailure($_message) {
