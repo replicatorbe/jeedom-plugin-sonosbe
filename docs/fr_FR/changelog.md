@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3 — 20/10/2026
+
+- Le point d'entrée appelé par le démon n'accepte plus que la clé API du
+  plugin : la clé personnelle d'un utilisateur Jeedom y donnait aussi accès.
+
 ## 0.4.2 — 18/10/2026
 
 - Pochette, titre, artiste, album et station ne sont plus réécrits à chaque
