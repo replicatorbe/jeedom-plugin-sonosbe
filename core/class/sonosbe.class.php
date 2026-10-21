@@ -255,17 +255,44 @@ class sonosbe extends eqLogic {
         return false;
     }
 
+    /* Arrêt propre : SIGTERM, puis jusqu'à dix secondes pour que le démon
+     * ferme ses connexions aux enceintes avant de s'effacer. Le
+     * kill -9 qui suivait aussitôt le SIGTERM ne lui en laissait pas le
+     * temps. */
     public static function deamon_stop() {
         $pid_file = jeedom::getTmpFolder(__CLASS__) . '/deamon.pid';
         if (file_exists($pid_file)) {
-            $pid = trim(file_get_contents($pid_file));
-            if ($pid != '') {
-                system::kill($pid);
+            $pid = (int) trim(file_get_contents($pid_file));
+            if ($pid > 0 && self::isDaemonPid($pid)) {
+                posix_kill($pid, 15);
+                for ($i = 0; $i < 40 && self::isDaemonPid($pid); $i++) {
+                    usleep(250000);
+                }
+                if (self::isDaemonPid($pid)) {
+                    posix_kill($pid, 9);
+                }
             }
             @unlink($pid_file);
         }
-        system::kill('resources/sonosbed/sonosbed.php');
+        /* Filet de sécurité : un démon lancé à la main, ou dont le fichier de
+         * PID a été perdu. */
+        if (count(system::ps('resources/sonosbed/sonosbed.php')) > 0) {
+            system::kill('resources/sonosbed/sonosbed.php', false);
+            for ($i = 0; $i < 20 && count(system::ps('resources/sonosbed/sonosbed.php')) > 0; $i++) {
+                usleep(250000);
+            }
+            if (count(system::ps('resources/sonosbed/sonosbed.php')) > 0) {
+                system::kill('resources/sonosbed/sonosbed.php');
+            }
+        }
         return true;
+    }
+
+    /* Le PID est-il toujours notre démon ? Après un kill -9, il a pu être
+     * réattribué à un autre processus. */
+    private static function isDaemonPid($_pid) {
+        $cmdline = @file_get_contents('/proc/' . (int) $_pid . '/cmdline');
+        return $cmdline !== false && strpos($cmdline, 'sonosbed.php') !== false;
     }
 
     public static function getCallbackUrl() {

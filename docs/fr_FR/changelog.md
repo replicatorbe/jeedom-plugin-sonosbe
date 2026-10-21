@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.4 — 21/10/2026
+
+- Arrêt du démon propre : il reçoit SIGTERM et a jusqu'à dix secondes pour
+  fermer ses connexions aux enceintes avant un kill -9, qui le suivait
+  jusqu'ici aussitôt.
+
 ## 0.4.3 — 20/10/2026
 
 - Le point d'entrée appelé par le démon n'accepte plus que la clé API du
